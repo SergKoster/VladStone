@@ -1,0 +1,40 @@
+from datetime import UTC, datetime, timedelta
+
+from app.domain.combat.constants import TURN_DURATION_SECONDS
+from app.domain.combat.models import MatchLifecycleStatus, MatchState
+
+
+def start_planning_timer(match: MatchState, *, now: datetime | None = None) -> MatchState:
+    started_at = _as_utc(now or datetime.now(UTC))
+    match.planning_deadline = started_at + timedelta(seconds=TURN_DURATION_SECONDS)
+    return match
+
+
+def clear_planning_timer(match: MatchState) -> MatchState:
+    match.planning_deadline = None
+    return match
+
+
+def is_planning_deadline_expired(
+    match: MatchState,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if match.status != MatchLifecycleStatus.PLANNING or match.planning_deadline is None:
+        return False
+    return _as_utc(now or datetime.now(UTC)) >= _as_utc(match.planning_deadline)
+
+
+def seconds_until_deadline(match: MatchState, *, now: datetime | None = None) -> int | None:
+    if match.planning_deadline is None:
+        return None
+    remaining = (
+        _as_utc(match.planning_deadline) - _as_utc(now or datetime.now(UTC))
+    ).total_seconds()
+    return max(0, int(remaining))
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

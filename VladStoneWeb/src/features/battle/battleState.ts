@@ -1,0 +1,66 @@
+import { type CombatEvent, type CombatMatch, type Placement } from "../../api";
+
+export function withCombatEvents(match: CombatMatch, events: CombatEvent[]): CombatMatch {
+  return {
+    ...match,
+    events,
+  };
+}
+
+export function secondsFromDeadline(match: CombatMatch) {
+  if (!match.planning_deadline || match.status !== "planning") {
+    return 0;
+  }
+  return Math.max(0, Math.ceil((Date.parse(match.planning_deadline) - Date.now()) / 1000));
+}
+
+export function nextManaGain(currentTurn: number) {
+  const nextTurn = currentTurn + 1;
+  if (nextTurn % 10 === 0) {
+    return 3;
+  }
+  if (nextTurn % 3 === 0) {
+    return 2;
+  }
+  return 1;
+}
+
+export function shortCardName(cardId: string) {
+  if (cardId === "test_bruiser") {
+    return "Толстяк";
+  }
+  if (cardId === "test_ranger") {
+    return "Дальник";
+  }
+  return cardId;
+}
+
+export function battleSnapshot(
+  match: CombatMatch | null,
+  placements: Placement[],
+  extra: Record<string, unknown> = {},
+) {
+  const player = match?.players.find((candidate) => candidate.id === "player");
+  const bot = match?.players.find((candidate) => candidate.id === "bot");
+  return {
+    turn: match?.turn ?? null,
+    playerMana: player?.mana ?? null,
+    botMana: bot?.mana ?? null,
+    playerHeroHp: player?.hero.hp ?? null,
+    botHeroHp: bot?.hero.hp ?? null,
+    placements,
+    units:
+      match?.units.map((unit) => ({
+        id: unit.id,
+        cardId: unit.card_id,
+        side: unit.side,
+        row: unit.position.row,
+        col: unit.position.col,
+        hp: unit.current_hp,
+        steps: unit.remaining_steps,
+        attacks: unit.remaining_attacks,
+      })) ?? [],
+    logTail: match?.log.slice(-8).map((entry) => entry.message) ?? [],
+    ...extra,
+  };
+}
