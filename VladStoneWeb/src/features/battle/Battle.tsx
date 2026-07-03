@@ -6,14 +6,43 @@ import {
   type CombatUnit,
   type CollectionCard,
   type Placement,
+  type Rarity,
   getActiveCombats,
   getCombat,
   logClientEvent,
   resolveCombat,
   startCombat,
 } from "../../api";
-import { starterCards } from "../../shared/cards";
-import { applyEventSnapshot, wait } from "./animationState";
+import { Card } from "../../shared/Card";
+import { CardArt } from "../../shared/cardArt";
+import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
+import { applyEventHp, applyEventSnapshot, wait } from "./animationState";
+import {
+  type AnimationSpeed,
+  STRIKE_IMPACT,
+  durationFor,
+  layerTimings,
+  pauseFor,
+  prefersReducedMotion,
+  strikeFor,
+} from "./animationConfig";
+
+// Online play resolves micro-steps on the server; the client just replays them
+// at one fixed, deterministic pace (no per-client speed switching mid-match).
+const ANIMATION_SPEED: AnimationSpeed = "normal";
+// Planning seconds shown on the turn timer (mirrors TURN_DURATION_SECONDS). The
+// server pushes the deadline past the resolution animation, so we clamp the
+// display to this — the timer reads "frozen" until planning actually starts.
+const TURN_SECONDS = 30;
+import {
+  type DamagePopup,
+  type LungeEffect,
+  computeLunge,
+  damageLocation,
+  isCollision,
+  isMeleeLunge,
+  useBattleEffects,
+} from "./battleAnimations";
 import {
   battleSnapshot,
   nextManaGain,
@@ -25,7 +54,13 @@ import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime"
 import { useBattleAnimationState } from "./useBattleAnimationState";
 import { useBattleUiState } from "./useBattleUiState";
 
-export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
+export function Battle({
+  cards,
+  onBattleFinished,
+}: {
+  cards: CollectionCard[];
+  onBattleFinished: () => void;
+}) {
   const cells = Array.from({ length: 15 }, (_, index) => index);
   const [match, setMatch] = React.useState<CombatMatch | null>(null);
   const {
@@ -45,6 +80,8 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
     setSelectedCard,
   } = useBattleUiState();
   const { activeEvent, isAnimating, setActiveEvent, setIsAnimating } = useBattleAnimationState();
+  const { lunges, setLunges, clearLunges, popups, addPopup, dyingIds, markDying, reset: resetEffects } =
+    useBattleEffects();
   const [realtimeStatus, setRealtimeStatus] =
     React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const isRealtimeBusyRef = React.useRef(false);
@@ -54,7 +91,7 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
   const isFinished = match?.result.status === "finished";
   const playerMana = player?.mana ?? 0;
   const plannedCost = placements.reduce((sum, placement) => {
-    const card = starterCards.find((candidate) => candidate.id === placement.card_id);
+    const card = cards.find((candidate) => candidate.id === placement.card_id);
     return sum + (card?.cost ?? 0);
   }, 0);
   const availableMana = Math.max(0, playerMana - plannedCost);
@@ -222,6 +259,85 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
     return match?.units.find((unit) => unit.position.row === row && unit.position.col === col);
   }
 
+  function samePosition(
+    a: { row: number; col: number } | null,
+    b: { row: number; col: number } | null,
+  ) {
+    return Boolean(a && b && a.row === b.row && a.col === b.col);
+  }
+
+  function dropSpawnedPlacement(event: CombatEvent) {
+    if (event.type !== "spawn") {
+      return;
+    }
+    const spawnedUnit = event.snapshot.units?.find((unit) => unit.id === event.actor_id);
+    if (spawnedUnit?.side !== "bottom") {
+      return;
+    }
+    setPlacements((current) =>
+      current.filter(
+        (placement) =>
+          placement.row !== spawnedUnit.position.row ||
+          placement.col !== spawnedUnit.position.col,
+      ),
+    );
+  }
+
+  function applyEventToBoard(event: CombatEvent, finalMatch: CombatMatch) {
+    if (event.type === "death" && event.actor_id) {
+      // Keep the dying unit on the board (skip its removal) so the fade plays.
+      markDying(event.actor_id);
+      setMatch((current) => ({
+        ...(current ?? finalMatch),
+        players: event.snapshot.players ?? current?.players ?? finalMatch.players,
+        log: [...(current?.log ?? []), { message: event.message }].slice(-24),
+      }));
+    } else {
+      setMatch((current) => applyEventSnapshot(current ?? finalMatch, event, finalMatch));
+    }
+    dropSpawnedPlacement(event);
+  }
+
+  function emitDamagePopup(event: CombatEvent, ttlMs: number) {
+    const location = damageLocation(event);
+    if (location) {
+      addPopup(
+        { row: location.row, col: location.col, amount: event.damage!, kind: location.kind },
+        ttlMs,
+      );
+    }
+  }
+
+  // Attacker(s) jump sharply onto the target, the hit lands (HP drops here, in
+  // sync with the animation), then they ease back. Passing several lunge events
+  // animates them together — both sides of a collision leap into the cell at once.
+  // `snapshotEvent` carries the post-hit state to apply at the impact moment.
+  async function playLunge(
+    lungeEvents: CombatEvent[],
+    snapshotEvent: CombatEvent,
+    finalMatch: CombatMatch,
+  ) {
+    const speed = ANIMATION_SPEED;
+    const strikeMs = strikeFor(speed);
+    const impactMs = Math.round(strikeMs * STRIKE_IMPACT);
+    const ttl = Math.max(900, strikeMs);
+    const offsets = lungeEvents
+      .map(computeLunge)
+      .filter((entry): entry is LungeEffect => entry !== null);
+
+    setLunges(offsets);
+    await wait(impactMs);
+    // Impact: the attacker is on the target — apply the post-hit board state and
+    // patch each target's exact HP (snapshots are pre-damage), then pop numbers.
+    applyEventToBoard(snapshotEvent, finalMatch);
+    setMatch((current) =>
+      lungeEvents.reduce((acc, event) => applyEventHp(acc, event), current ?? finalMatch),
+    );
+    lungeEvents.forEach((event) => emitDamagePopup(event, ttl));
+    await wait(strikeMs - impactMs);
+    clearLunges();
+  }
+
   async function playCombatEvents(finalMatch: CombatMatch) {
     const events = finalMatch.events ?? [];
     if (!events.length) {
@@ -229,27 +345,75 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
       setActiveEvent(null);
       return;
     }
+
+    const speed = ANIMATION_SPEED;
     setIsAnimating(true);
-    for (const event of events) {
+
+    // Fallback for debug/reduced motion: jump straight to the resolved state.
+    if (speed === "off" || prefersReducedMotion()) {
+      events.forEach(dropSpawnedPlacement);
+      setMatch(finalMatch);
+      setActiveEvent(null);
+      resetEffects();
+      setIsAnimating(false);
+      if (finalMatch.result.status === "finished") {
+        onBattleFinished();
+      }
+      return;
+    }
+
+    const pause = pauseFor(speed);
+    let index = 0;
+    while (index < events.length) {
+      const event = events[index];
       setActiveEvent(event);
       setBattleMessage(event.message);
-      setMatch((current) => applyEventSnapshot(current ?? finalMatch, event, finalMatch));
-      if (event.type === "spawn") {
-        const spawnedUnit = event.snapshot.units?.find((unit) => unit.id === event.actor_id);
-        if (spawnedUnit?.side === "bottom") {
-          setPlacements((current) =>
-            current.filter(
-              (placement) =>
-                placement.row !== spawnedUnit.position.row ||
-                placement.col !== spawnedUnit.position.col,
-            ),
-          );
+
+      // Collision cluster: consecutive collision events on the same cell play
+      // together so both contenders leap into the tile from their own sides.
+      // The cluster's last event holds the post-collision HP, applied at impact.
+      if (isCollision(event)) {
+        const cell = event.to_position;
+        const group: CombatEvent[] = [];
+        while (
+          index < events.length &&
+          isCollision(events[index]) &&
+          samePosition(events[index].to_position, cell)
+        ) {
+          group.push(events[index]);
+          index += 1;
         }
+        await playLunge(group.filter((entry) => entry.actor_id), group[group.length - 1], finalMatch);
+        await wait(pause);
+        continue;
       }
-      await wait(620);
+
+      // Melee/ranged strike: keep the board as-is until the attacker lands, then
+      // playLunge applies the hit (HP) in sync with the animation.
+      if (isMeleeLunge(event)) {
+        await playLunge([event], event, finalMatch);
+        await wait(pause);
+        index += 1;
+        continue;
+      }
+
+      applyEventToBoard(event, finalMatch);
+
+      if (event.type === "death") {
+        await wait(durationFor("death", speed));
+        await wait(pause);
+        index += 1;
+        continue;
+      }
+
+      await wait(durationFor(event.type, speed));
+      await wait(pause);
+      index += 1;
     }
+
     setMatch(finalMatch);
     setActiveEvent(null);
+    resetEffects();
     setIsAnimating(false);
     if (finalMatch.result.status === "finished") {
       onBattleFinished();
@@ -346,37 +510,68 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
   return (
     <div className="battle-page">
       <section className="battle-stage">
+        <div className="battle-topbar">
+          <button
+            className="ghost-btn"
+            disabled={isResolving || isAnimating}
+            onClick={handleStartBattle}
+          >
+            {match ? "Новый бой" : "Старт"}
+          </button>
+        </div>
         <div className={activeEvent?.target_id === "bot" ? "hero-line enemy hit" : "hero-line enemy"}>
           Герой врага · {bot?.hero.hp ?? 20} HP
         </div>
-        <div className="board">
-          {cells.map((cell) => {
-            const position = cellPosition(cell);
-            const unit = unitAt(position.row, position.col);
-            const planned = plannedUnitAt(position.row, position.col);
-            const shouldShowPlan = Boolean(planned && (!isAnimating || !unit));
-            return (
-              <button
-                className={cell >= 12 ? "board-cell spawn" : "board-cell"}
-                key={cell}
-                onClick={() => handleCellClick(cell)}
-              >
-                {unit ? (
-                  <UnitBadge
-                    active={unit.id === activeEvent?.actor_id}
-                    targeted={unit.id === activeEvent?.target_id}
-                    unit={unit}
-                  />
-                ) : null}
-                {shouldShowPlan && planned ? (
-                  <span className="planned-unit">
-                    План
-                    <strong>{shortCardName(planned.card_id)}</strong>
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+        {isResolving || isAnimating ? (
+          <div className="resolve-banner" role="status">
+            {isResolving ? "Сервер разыгрывает ход" : "Идёт ход"}
+          </div>
+        ) : null}
+        <div className="board-wrap">
+          <div
+            aria-busy={isResolving || isAnimating}
+            className={isResolving || isAnimating ? "board locked" : "board"}
+          >
+            {cells.map((cell) => {
+              const position = cellPosition(cell);
+              const unit = unitAt(position.row, position.col);
+              const planned = plannedUnitAt(position.row, position.col);
+              const shouldShowPlan = Boolean(planned && (!isAnimating || !unit));
+              return (
+                <button
+                  className={cell >= 12 ? "board-cell spawn" : "board-cell"}
+                  key={cell}
+                  onClick={() => handleCellClick(cell)}
+                >
+                  {shouldShowPlan && planned ? (
+                    <span className="planned-unit">
+                      План
+                      <strong>{shortCardName(planned.card_id)}</strong>
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            className="unit-layer"
+            style={layerStyle(ANIMATION_SPEED)}
+          >
+            {(match?.units ?? []).map((unit) => (
+              <UnitToken
+                acting={unit.id === activeEvent?.actor_id}
+                dying={dyingIds.includes(unit.id)}
+                key={unit.id}
+                lunge={lunges.find((entry) => entry.unitId === unit.id) ?? null}
+                rarity={cards.find((card) => card.id === unit.card_id)?.rarity ?? "common"}
+                targeted={unit.id === activeEvent?.target_id}
+                unit={unit}
+              />
+            ))}
+            {popups.map((popup) => (
+              <DamagePopupView key={popup.key} popup={popup} />
+            ))}
+          </div>
         </div>
         <div className={activeEvent?.target_id === "player" ? "hero-line hit" : "hero-line"}>
           Твой герой · {player?.hero.hp ?? 20} HP
@@ -389,11 +584,8 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
 
       <section className="battle-side">
         <div className="battle-hud">
-          <button disabled={isResolving || isAnimating} onClick={handleStartBattle}>
-            Старт
-          </button>
           <div className={secondsLeft <= 5 && isTimerRunning ? "turn-timer warning" : "turn-timer"}>
-            {isTimerRunning ? secondsLeft : 30}
+            {isTimerRunning ? Math.min(TURN_SECONDS, secondsLeft) : TURN_SECONDS}
           </div>
           <div className="turn-plate">
             <strong>Ход {match?.turn ?? 1}</strong>
@@ -401,15 +593,14 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
           </div>
         </div>
         <section className="hand compact-hand">
-          {starterCards.map((card) => (
+          {cards.map((card) => (
             <button
               className={selectedCard?.id === card.id ? "hand-card active" : "hand-card"}
               disabled={isResolving || isAnimating || isFinished}
               key={card.id}
               onClick={() => handleSelectCard(card)}
             >
-              <strong>{shortCardName(card.id)}</strong>
-              <span>{card.cost} маны</span>
+              <Card card={card} />
             </button>
           ))}
         </section>
@@ -434,12 +625,68 @@ export function Battle({ onBattleFinished }: { onBattleFinished: () => void }) {
   );
 }
 
+function layerStyle(speed: AnimationSpeed): React.CSSProperties {
+  const { moveMs, strikeMs } = layerTimings(speed);
+  return {
+    ["--move-ms"]: `${moveMs}ms`,
+    ["--strike-ms"]: `${strikeMs}ms`,
+  } as React.CSSProperties;
+}
+
+function UnitToken({
+  acting,
+  dying,
+  lunge,
+  rarity,
+  targeted,
+  unit,
+}: {
+  acting: boolean;
+  dying: boolean;
+  lunge: LungeEffect | null;
+  rarity: Rarity;
+  targeted: boolean;
+  unit: CombatUnit;
+}) {
+  const tokenStyle = {
+    ["--col"]: unit.position.col,
+    ["--row"]: unit.position.row,
+  } as React.CSSProperties;
+  // While striking, lift the attacker above the target so it reads as "on top".
+  const tokenClasses = ["unit-token", dying ? "dying" : "", lunge ? "lunging" : ""]
+    .filter(Boolean)
+    .join(" ");
+  // The strike target is fed to the keyframe via CSS vars (in % of one cell).
+  const innerStyle = lunge
+    ? ({ ["--lunge-x"]: `${lunge.dx}%`, ["--lunge-y"]: `${lunge.dy}%` } as React.CSSProperties)
+    : undefined;
+  return (
+    <div className={tokenClasses} style={tokenStyle}>
+      <div className={lunge ? "unit-token-inner striking" : "unit-token-inner"} style={innerStyle}>
+        <UnitBadge active={acting} rarity={rarity} targeted={targeted} unit={unit} />
+      </div>
+    </div>
+  );
+}
+
+function DamagePopupView({ popup }: { popup: DamagePopup }) {
+  const style = { ["--col"]: popup.col, ["--row"]: popup.row } as React.CSSProperties;
+  return (
+    <span className={popup.kind === "hero" ? "damage-popup hero" : "damage-popup"} style={style}>
+      <BurstIcon className="damage-burst" />
+      <span className="damage-popup-text">-{popup.amount}</span>
+    </span>
+  );
+}
+
 function UnitBadge({
   active = false,
+  rarity,
   targeted = false,
   unit,
 }: {
   active?: boolean;
+  rarity: Rarity;
   targeted?: boolean;
   unit: CombatUnit;
 }) {
@@ -453,11 +700,23 @@ function UnitBadge({
     .join(" ");
   return (
     <span className={classes}>
-      <strong>{shortCardName(unit.card_id)}</strong>
-      <span>У:{unit.stats.damage}</span>
-      <span>ХП:{unit.current_hp}</span>
-      <span>Ш:{unit.remaining_steps}</span>
-      <span>А:{unit.remaining_attacks}</span>
+      <CardArt cardId={unit.card_id} label={shortCardName(unit.card_id)} rarity={rarity} />
+      <span className="unit-pip steps">
+        <BootIcon />
+        {unit.remaining_steps}
+      </span>
+      <span className="unit-pip attacks">
+        <SwordIcon />
+        {unit.remaining_attacks}
+      </span>
+      <span className="unit-pip damage">
+        <BurstIcon />
+        {unit.stats.damage}
+      </span>
+      <span className="unit-pip hp">
+        <HeartIcon />
+        {unit.current_hp}
+      </span>
     </span>
   );
 }

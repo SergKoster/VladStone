@@ -14,6 +14,14 @@ class ActionPriority(StrEnum):
     MOVE_FIRST = "move_first"
 
 
+class Rarity(StrEnum):
+    COMMON = "common"
+    UNCOMMON = "uncommon"
+    RARE = "rare"
+    EPIC = "epic"
+    LEGENDARY = "legendary"
+
+
 class CombatEventType(StrEnum):
     SPAWN = "spawn"
     SPAWN_BLOCKED = "spawn_blocked"
@@ -61,6 +69,7 @@ class CardDefinition(BaseModel):
     id: str
     name: str
     cost: int = Field(ge=0)
+    rarity: Rarity = Rarity.COMMON
     stats: UnitStats
 
 

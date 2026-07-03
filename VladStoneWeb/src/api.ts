@@ -18,10 +18,13 @@ export type ProfileResponse = {
   created_at: string;
 };
 
+export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+
 export type CollectionCard = {
   id: string;
   name: string;
   cost: number;
+  rarity: Rarity;
   hp: number;
   damage: number;
   range: number;
@@ -144,6 +147,10 @@ export function googleDevLogin(email: string) {
 
 export function getMe() {
   return request<ProfileResponse>("/me");
+}
+
+export function getCardCatalog() {
+  return request<{ cards: CollectionCard[] }>("/combat/catalog");
 }
 
 export function getCollection() {

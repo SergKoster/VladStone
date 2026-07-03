@@ -8,6 +8,8 @@ from app.api.schemas import AscendCardRequest
 from app.db.models import CardDefinition, PlayerCard, PlayerProfile
 from app.db.session import get_db
 from app.domain.catalog import ASCENSION_LABELS
+from app.domain.combat.cards import CARD_BY_ID
+from app.domain.combat.models import Rarity
 from app.services.auth import get_user_by_refresh_token
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -103,6 +105,7 @@ def _collection_payload(db: Session, user_id: int) -> dict:
                 "id": definition.id,
                 "name": definition.name,
                 "cost": definition.cost,
+                "rarity": _card_rarity(definition.id),
                 "hp": definition.hp,
                 "damage": definition.damage,
                 "range": definition.attack_range,
@@ -114,6 +117,12 @@ def _collection_payload(db: Session, user_id: int) -> dict:
             for card, definition in rows
         ]
     }
+
+
+def _card_rarity(card_id: str) -> str:
+    # Rarity is static card metadata; the domain catalog is its source of truth.
+    card = CARD_BY_ID.get(card_id)
+    return (card.rarity if card else Rarity.COMMON).value
 
 
 def _require_user(db: Session, refresh_token: str | None):

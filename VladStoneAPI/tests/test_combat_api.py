@@ -13,6 +13,21 @@ from app.services.combat_matches import create_combat_match_record, load_match
 from app.services.combat_turn_timers import resolve_expired_planning_matches
 
 
+def test_card_catalog_matches_combat_stats() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/api/combat/catalog")
+    assert response.status_code == 200
+
+    cards = {card["id"]: card for card in response.json()["cards"]}
+    ranger = cards["test_ranger"]
+    assert ranger["hp"] == RANGER_CARD.stats.hp
+    assert ranger["damage"] == RANGER_CARD.stats.damage
+    assert ranger["range"] == RANGER_CARD.stats.attack_range
+    assert ranger["cost"] == RANGER_CARD.cost
+    assert ranger["ascension"] == "Дефолт"
+
+
 def test_start_and_resolve_combat_turn() -> None:
     client = TestClient(create_app())
 

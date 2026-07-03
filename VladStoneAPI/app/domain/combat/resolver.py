@@ -6,7 +6,11 @@ from app.domain.combat.constants import BOARD_ROWS
 from app.domain.combat.lifecycle import finish_match_if_needed, remove_dead_units
 from app.domain.combat.models import ActionPriority, MatchLifecycleStatus, MatchState
 from app.domain.combat.movement import MoveIntent, apply_move_intents, move_intent
-from app.domain.combat.timing import clear_planning_timer, start_planning_timer
+from app.domain.combat.timing import (
+    clear_planning_timer,
+    resolution_buffer_seconds,
+    start_planning_timer,
+)
 
 
 def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchState:
@@ -33,7 +37,9 @@ def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchStat
         for player in resolved.players:
             player.mana = add_turn_mana(player.mana, resolved.turn, resolved.mana_cap)
         resolved.status = MatchLifecycleStatus.PLANNING
-        start_planning_timer(resolved, now=now)
+        # Freeze planning until the resolution animation has had time to play.
+        buffer = resolution_buffer_seconds(len(resolved.events))
+        start_planning_timer(resolved, now=now, resolve_buffer_seconds=buffer)
     return resolved
 
 

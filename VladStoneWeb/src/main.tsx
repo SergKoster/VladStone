@@ -5,6 +5,7 @@ import "./styles.css";
 import {
   type AuthUser,
   type CollectionCard,
+  getCardCatalog,
   getCollection,
   getMe,
   googleDevLogin,
@@ -18,7 +19,6 @@ import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Profile } from "./features/profile/Profile";
 import { t } from "./i18n";
-import { starterCards } from "./shared/cards";
 import { useHashRoute } from "./shared/routing";
 import { useServerResource } from "./shared/serverState";
 
@@ -35,9 +35,10 @@ function App() {
     null,
   );
   const collectionState = useServerResource<CollectionCard[]>(
-    () => (authUser ? getCollection().then((payload) => payload.cards) : Promise.resolve(starterCards)),
+    () =>
+      (authUser ? getCollection() : getCardCatalog()).then((payload) => payload.cards),
     [authUser?.id],
-    starterCards,
+    [],
   );
   const profile = profileState.data;
   const collection = collectionState.data;
@@ -78,7 +79,7 @@ function App() {
     await logout().catch(() => undefined);
     setAuthUser(null);
     profileState.setData(null);
-    collectionState.setData(starterCards);
+    collectionState.setData([]);
     setCode("");
     setDevCode(null);
     setRoute("dashboard");
@@ -137,7 +138,10 @@ function App() {
           <Collection cards={collection} onCollectionChange={collectionState.setData} />
         )}
         {route === "battle" && (
-          <Battle onBattleFinished={() => profileState.refresh().catch(() => undefined)} />
+          <Battle
+            cards={collection}
+            onBattleFinished={() => profileState.refresh().catch(() => undefined)}
+          />
         )}
         {route === "profile" && (
           <Profile

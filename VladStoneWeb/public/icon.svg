@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="VladStone">
+  <rect width="512" height="512" rx="96" fill="#2d5f4d" />
+  <g fill="none" stroke="#f8faf6" stroke-width="20" stroke-linejoin="round">
+    <rect x="150" y="120" width="150" height="210" rx="18" transform="rotate(-12 225 225)" fill="#244d3f" />
+    <rect x="210" y="150" width="150" height="210" rx="18" transform="rotate(8 285 255)" fill="#3a7a63" />
+  </g>
+  <text x="256" y="430" font-family="Inter, Segoe UI, sans-serif" font-size="120" font-weight="800"
+        text-anchor="middle" fill="#f8faf6">VS</text>
+</svg>

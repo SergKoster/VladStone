@@ -1,0 +1,26 @@
+{
+  "name": "VladStone",
+  "short_name": "VladStone",
+  "description": "Карточная MMO-игра. Играй с любого устройства.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef1ec",
+  "theme_color": "#2d5f4d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}

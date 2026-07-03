@@ -1,9 +1,10 @@
-from app.domain.combat.models import ActionPriority, CardDefinition, UnitStats
+from app.domain.combat.models import ActionPriority, CardDefinition, Rarity, UnitStats
 
 BRUISER_CARD = CardDefinition(
     id="test_bruiser",
     name="Тестовый толстяк",
     cost=3,
+    rarity=Rarity.COMMON,
     stats=UnitStats(
         hp=4,
         damage=2,
@@ -18,6 +19,7 @@ RANGER_CARD = CardDefinition(
     id="test_ranger",
     name="Тестовый дальник",
     cost=2,
+    rarity=Rarity.UNCOMMON,
     stats=UnitStats(
         hp=2,
         damage=1,

@@ -1,4 +1,5 @@
 import { type CollectionCard, ascendCard } from "../../api";
+import { Card } from "../../shared/Card";
 import { t } from "../../i18n";
 
 export function Collection({
@@ -24,32 +25,7 @@ export function Collection({
       <section className="card-grid">
         {cards.map((card) => (
           <article className="game-card" key={card.id}>
-            <div className="card-topline">
-              <strong>{card.name}</strong>
-              <span>{card.cost}</span>
-            </div>
-            <dl>
-              <div>
-                <dt>HP</dt>
-                <dd>{card.hp}</dd>
-              </div>
-              <div>
-                <dt>Урон</dt>
-                <dd>{card.damage}</dd>
-              </div>
-              <div>
-                <dt>Дальность</dt>
-                <dd>{card.range}</dd>
-              </div>
-              <div>
-                <dt>Шаги</dt>
-                <dd>{card.steps}</dd>
-              </div>
-              <div>
-                <dt>Атаки</dt>
-                <dd>{card.attacks}</dd>
-              </div>
-            </dl>
+            <Card card={card} />
             <p className="muted">{card.ascension} · повторки {card.copies}/2</p>
             <button
               className="secondary"

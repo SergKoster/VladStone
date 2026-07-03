@@ -32,16 +32,22 @@ def attack_intent(match: MatchState, unit: UnitState) -> AttackIntent | None:
 
 
 def apply_attack_intents(match: MatchState, intents: list[AttackIntent]) -> None:
+    # Damage allocated to each target so far this micro-step. Used both to report
+    # accurate incremental before/after HP and to avoid overkill: a unit will not
+    # spend its attack on a target that is already doomed by earlier attackers.
     unit_damage: dict[str, int] = defaultdict(int)
     hero_damage: dict[str, int] = defaultdict(int)
     for intent in intents:
         unit = intent.unit
         if unit.current_hp <= 0 or unit.remaining_attacks <= 0:
             continue
-        unit.remaining_attacks -= 1
         if intent.target_unit is not None and intent.target_unit.current_hp > 0:
+            before_hp = intent.target_unit.current_hp - unit_damage[intent.target_unit.id]
+            if before_hp <= 0:
+                # Target already lethally allocated — keep this attack for later.
+                continue
+            unit.remaining_attacks -= 1
             unit_damage[intent.target_unit.id] += unit.stats.damage
-            before_hp = intent.target_unit.current_hp
             log_and_event(
                 match,
                 CombatEventType.ATTACK,
@@ -56,8 +62,11 @@ def apply_attack_intents(match: MatchState, intents: list[AttackIntent]) -> None
                 after_hp=max(0, before_hp - unit.stats.damage),
             )
         elif intent.target_hero is not None and intent.target_hero.hp > 0:
+            before_hp = intent.target_hero.hp - hero_damage[intent.target_hero.owner_id]
+            if before_hp <= 0:
+                continue
+            unit.remaining_attacks -= 1
             hero_damage[intent.target_hero.owner_id] += unit.stats.damage
-            before_hp = intent.target_hero.hp
             log_and_event(
                 match,
                 CombatEventType.HERO_HIT,

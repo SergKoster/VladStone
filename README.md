@@ -1,5 +1,7 @@
 # VladStone
 
+[![CI](https://github.com/SergKoster/VladStone/actions/workflows/ci.yml/badge.svg)](https://github.com/SergKoster/VladStone/actions/workflows/ci.yml)
+
 Карточная MMO-игра в разработке. Текущий фокус: web MVP, отдельный FastAPI backend, React frontend, Docker-first запуск и изолированный модуль боевых правил.
 
 ## Структура

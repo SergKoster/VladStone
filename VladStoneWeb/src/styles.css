@@ -15,6 +15,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior-y: contain;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button,
@@ -29,6 +32,7 @@ button {
   color: #f8faf6;
   background: #2d5f4d;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 button:hover {
@@ -97,6 +101,7 @@ p {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .sidebar {
@@ -187,68 +192,211 @@ nav {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
 }
 
 .game-card {
   display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid #d4ddd6;
-  border-radius: 8px;
-  background: #fbfcfa;
-}
-
-.card-topline {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.card-topline span {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 50%;
-  color: #f8faf6;
-  background: #2d5f4d;
-  font-weight: 700;
-}
-
-dl {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
-  margin: 0;
+  align-content: start;
 }
 
-dt {
-  color: #66746b;
-  font-size: 0.78rem;
+/* --- Icons --- */
+.ico {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  vertical-align: -0.14em;
 }
 
-dd {
-  margin: 0;
+/* --- Card face (4:5), shared by hand and collection --- */
+.card-face {
+  display: grid;
+  /* 4:5 card with a square (4fr = full width) art panel and a 1fr info strip. */
+  grid-template-rows: 4fr 1fr;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border: 2px solid var(--rarity-color, #c5d2ca);
+  border-radius: 10px;
+  background: #fbfcfa;
+  color: #16201b;
+  user-select: none;
+}
+
+.card-art-wrap {
+  container-type: inline-size;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Rarity tints, also exposed as --rarity-color for frames. */
+[data-rarity="common"] {
+  --rarity-color: #9aa3a8;
+}
+[data-rarity="uncommon"] {
+  --rarity-color: #4c9a52;
+}
+[data-rarity="rare"] {
+  --rarity-color: #3f74c4;
+}
+[data-rarity="epic"] {
+  --rarity-color: #8a52c4;
+}
+[data-rarity="legendary"] {
+  --rarity-color: #d4b13f;
+}
+
+/* Square art: rarity background layer + transparent card icon (or initials). */
+.card-art {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--rarity-color, #aab2ad);
+}
+
+.card-art-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-art-icon {
+  position: relative;
+  width: 86%;
+  height: 86%;
+  object-fit: contain;
+}
+
+.card-art-glyph {
+  position: relative;
+  color: rgb(255 255 255 / 0.95);
+  font-size: 34cqi;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+.card-pip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16em;
+  padding: 0.14em 0.42em;
+  border-radius: 999px;
+  background: rgb(18 26 22 / 0.74);
+  color: #f8faf6;
+  font-size: 13cqi;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.card-pip.cost {
+  top: 5%;
+  left: 5%;
+}
+
+.card-pip.cost .ico {
+  color: #7fd1ff;
+}
+
+.card-pip.damage {
+  bottom: 5%;
+  left: 5%;
+}
+
+.card-pip.damage .ico {
+  color: #ffb24d;
+}
+
+.card-pip.hp {
+  bottom: 5%;
+  right: 5%;
+}
+
+.card-pip.hp .ico {
+  color: #ff8585;
+}
+
+.card-info {
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  padding: 5px 6px;
+  border-top: 1px solid #e0e7e1;
+  background: #f4f7f3;
+}
+
+.card-name {
+  color: #1d3129;
+  font-size: 0.82rem;
   font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-around;
+  gap: 4px;
+}
+
+.card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3a4c43;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.card-stat .ico {
+  color: #708274;
 }
 
 .battle-page {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(320px, 520px) minmax(260px, 360px);
+  grid-template-columns: minmax(320px, 1fr) minmax(260px, 360px);
   gap: 18px;
-  align-items: start;
-  max-width: 980px;
-  min-height: calc(100vh - 56px);
+  align-items: stretch;
+  max-width: 1100px;
+  min-height: calc(100dvh - 56px);
   overflow: hidden;
 }
 
 .battle-stage {
   display: grid;
   gap: 8px;
+  align-content: center;
   min-width: 0;
+  min-height: 0;
+}
+
+/* Thin battle header — keeps the start / new-battle action out of the way. */
+.battle-topbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ghost-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #c5d2ca;
+  border-radius: 999px;
+  color: #21372f;
+  background: #fbfcfa;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.ghost-btn:hover:not(:disabled) {
+  background: #eef4f0;
 }
 
 .hero-line {
@@ -269,14 +417,174 @@ dd {
   border-color: #b94d42;
 }
 
+/* Size from width, height derived via aspect-ratio so the grid never jumps
+   when unit text or logs change. Capped by viewport height to stay on screen.
+   The unit overlay is positioned against this wrapper. */
+.board-wrap {
+  position: relative;
+  width: min(100%, calc((100dvh - 230px) * 0.6), 420px);
+  aspect-ratio: 3 / 5;
+  margin: 0 auto;
+}
+
 .board {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(5, 1fr);
   gap: 6px;
-  width: min(100%, 650px);
-  height: min(60vh, 590px);
-  min-height: 430px;
+  width: 100%;
+  height: 100%;
+}
+
+/* Live units render here (not inside cells) so they can glide tile-to-tile.
+   Each token is positioned by --col/--row using the same gap math as the grid. */
+.unit-layer {
+  --cols: 3;
+  --rows: 5;
+  --gap: 6px;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.unit-token {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  padding: 4px;
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  transition: transform var(--move-ms, 340ms) cubic-bezier(0.34, 0.1, 0.2, 1);
+  will-change: transform;
+}
+
+.unit-token-inner {
+  width: 100%;
+  height: 100%;
+}
+
+/* A single strike: sharp jump onto the target, brief impact, then an eased
+   return. One keyframe (not two transitions) keeps the motion continuous. */
+.unit-token-inner.striking {
+  animation: unit-strike var(--strike-ms, 640ms) both;
+}
+
+@keyframes unit-strike {
+  0% {
+    transform: translate(0, 0);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.25);
+  }
+  40% {
+    transform: translate(var(--lunge-x, 0), var(--lunge-y, 0));
+    animation-timing-function: linear;
+  }
+  50% {
+    transform: translate(var(--lunge-x, 0), var(--lunge-y, 0));
+    animation-timing-function: cubic-bezier(0.22, 0.9, 0.32, 1);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+/* Lift the striking attacker above the unit it hits. */
+.unit-token.lunging {
+  z-index: 5;
+}
+
+.unit-token.dying .unit-token-inner {
+  transform-origin: center;
+  animation: unit-die var(--move-ms, 340ms) ease forwards;
+}
+
+@keyframes unit-die {
+  to {
+    opacity: 0;
+    transform: scale(0.5) rotate(8deg);
+  }
+}
+
+.damage-popup {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  display: grid;
+  place-items: center;
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  pointer-events: none;
+}
+
+.damage-popup-text {
+  color: #b94d42;
+  font-size: clamp(0.95rem, 3.4vw, 1.35rem);
+  font-weight: 800;
+  text-shadow:
+    0 1px 2px rgb(248 250 246 / 0.9),
+    0 0 2px rgb(248 250 246 / 0.9);
+  animation: damage-float 900ms ease-out forwards;
+}
+
+.damage-popup.hero .damage-popup-text {
+  color: #9d3d35;
+}
+
+.damage-popup-text {
+  position: relative;
+  z-index: 1;
+}
+
+/* Enlarged explosion that bursts on the target as the hit lands. */
+.damage-burst {
+  position: absolute;
+  width: 82%;
+  height: 82%;
+  color: #ff7a2f;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.3));
+  animation: burst-pop 600ms ease-out forwards;
+}
+
+.damage-popup.hero .damage-burst {
+  color: #ff5a3c;
+}
+
+@keyframes burst-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-14deg);
+  }
+  35% {
+    opacity: 0.95;
+    transform: scale(1.1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.55) rotate(10deg);
+  }
+}
+
+@keyframes damage-float {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.7);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(0) scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-28px) scale(1);
+  }
 }
 
 .board-cell {
@@ -290,6 +598,7 @@ dd {
   border: 1px solid #b8c7bd;
   color: #24352e;
   background: #f8faf6;
+  touch-action: manipulation;
   transition:
     transform 160ms ease,
     background 160ms ease,
@@ -304,6 +613,51 @@ dd {
 .board-cell.spawn {
   border-color: #2d5f4d;
   background: #dbe8de;
+}
+
+/* Resolve/animation lock: board stays fully readable, only input is muted. */
+.board.locked .board-cell {
+  cursor: default;
+}
+
+.board.locked .board-cell:hover {
+  transform: none;
+  background: #f8faf6;
+}
+
+.board.locked .board-cell.spawn:hover {
+  background: #dbe8de;
+}
+
+.resolve-banner {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 8px;
+  place-content: center;
+  place-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #2d5f4d;
+  color: #f8faf6;
+  font-size: 0.86rem;
+  font-weight: 700;
+  justify-self: center;
+}
+
+.resolve-banner::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(248 250 246 / 0.4);
+  border-top-color: #f8faf6;
+  border-radius: 50%;
+  animation: spin 720ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .timer {
@@ -324,7 +678,7 @@ dd {
 
 .battle-hud {
   display: grid;
-  grid-template-columns: 1fr 82px;
+  grid-template-columns: 82px 1fr;
   gap: 10px;
   align-items: stretch;
 }
@@ -346,10 +700,10 @@ dd {
 }
 
 .turn-plate {
-  grid-column: 1 / -1;
   display: grid;
   gap: 3px;
-  padding: 10px 12px;
+  align-content: center;
+  padding: 8px 12px;
   border: 1px solid #d4ddd6;
   border-radius: 8px;
   background: #fbfcfa;
@@ -392,25 +746,29 @@ dd {
 }
 
 .hand-card {
-  display: grid;
-  min-width: 138px;
-  padding: 10px;
-  gap: 4px;
-  text-align: left;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  transition: transform 140ms ease;
+}
+
+.hand-card:hover:not(:disabled) {
+  background: transparent;
+  transform: translateY(-3px);
 }
 
 .hand-card.active {
-  outline: 3px solid #88b89a;
-}
-
-.hand-card span {
-  font-size: 0.9rem;
-  opacity: 0.8;
+  outline: 3px solid #2f7fd0;
+  outline-offset: 1px;
 }
 
 .compact-hand {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(82px, 100px));
+  justify-content: center;
+  gap: 10px;
 }
 
 .battle-metrics {
@@ -441,39 +799,97 @@ dd {
   font-size: 0.92rem;
 }
 
+/* Board unit: the card's square art fills the cell with the live combat numbers
+   as icon pips on top. A coloured inset frame marks the side. */
 .unit-badge {
-  display: grid;
-  gap: 1px;
+  container-type: inline-size;
+  position: relative;
+  display: block;
   width: 100%;
   height: 100%;
-  align-content: center;
-  border-radius: 5px;
-  padding: 3px;
+  border-radius: 6px;
   overflow: hidden;
-  font-size: clamp(0.58rem, 0.92vw, 0.78rem);
   line-height: 1;
   animation: unit-pop 180ms ease-out;
 }
 
-.unit-badge strong {
-  margin-bottom: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.unit-badge .card-art {
+  border-radius: 6px;
 }
 
-.unit-badge.friendly {
-  background: #d7ebff;
-  color: #12375f;
+/* No names on the board — units read by their art. Live combat values sit in
+   the four corners as icon pips. */
+.unit-pip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1em;
+  padding: 0.08em 0.3em;
+  border-radius: 999px;
+  background: rgb(18 26 22 / 0.78);
+  color: #f8faf6;
+  font-size: 20cqi;
+  font-weight: 800;
+  line-height: 1;
 }
 
+.unit-pip.steps {
+  top: 4%;
+  left: 4%;
+}
+
+.unit-pip.attacks {
+  top: 4%;
+  right: 4%;
+}
+
+.unit-pip.damage {
+  bottom: 4%;
+  left: 4%;
+}
+
+.unit-pip.hp {
+  bottom: 4%;
+  right: 4%;
+}
+
+.unit-pip.damage .ico {
+  color: #ffb24d;
+}
+
+.unit-pip.hp .ico {
+  color: #ff8585;
+}
+
+.unit-pip.steps .ico,
+.unit-pip.attacks .ico {
+  color: #cfe0d4;
+}
+
+/* Team ring drawn over the art (an inset box-shadow would be hidden behind the
+   art image), so it's always clear which side a unit is on. */
+.unit-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.unit-badge.friendly::after {
+  border: 2px solid #2f7fd0;
+}
+
+.unit-badge.enemy::after {
+  border: 2px solid #d6402b;
+}
+
+/* Enemy units get an extra thin red outline for an at-a-glance read. */
 .unit-badge.enemy {
-  background: #ffe0d6;
-  color: #5d2116;
+  box-shadow: 0 0 0 1.5px #ff5a42;
 }
 
 .unit-badge.acting {
-  animation: unit-act 520ms ease;
   outline: 2px solid #2f7fd0;
 }
 
@@ -561,25 +977,12 @@ dd {
   font-size: 1.1rem;
 }
 
-@keyframes unit-act {
-  0% {
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    transform: translateY(-5px) scale(1.04);
-  }
-  100% {
-    transform: translateY(0) scale(1);
-  }
-}
-
 @keyframes hit-flash {
   0% {
     filter: brightness(1);
   }
   45% {
-    filter: brightness(1.18);
-    transform: scale(0.97);
+    filter: brightness(1.25);
   }
   100% {
     filter: brightness(1);
@@ -611,9 +1014,10 @@ dd {
     overflow: visible;
   }
 
-  .board {
-    height: min(58vh, 520px);
-    min-height: 380px;
+  /* Stacked layout: field on top, controls below. Cap the board by height so
+     the control panel stays reachable without scrolling on phones. */
+  .board-wrap {
+    width: min(100%, calc((100dvh - 360px) * 0.6), 360px);
   }
 
   .page-header,
@@ -621,5 +1025,23 @@ dd {
   .code-row {
     display: grid;
     grid-template-columns: 1fr;
+  }
+}
+
+/* Honour the safe area on notched phones in standalone/PWA mode. */
+@supports (padding: env(safe-area-inset-top)) {
+  .content {
+    padding-top: max(28px, env(safe-area-inset-top));
+    padding-bottom: max(28px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

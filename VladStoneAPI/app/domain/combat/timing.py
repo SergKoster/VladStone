@@ -1,12 +1,29 @@
 from datetime import UTC, datetime, timedelta
+from math import ceil
 
-from app.domain.combat.constants import TURN_DURATION_SECONDS
+from app.domain.combat.constants import (
+    MAX_RESOLVE_BUFFER_SECONDS,
+    RESOLVE_STEP_SECONDS,
+    TURN_DURATION_SECONDS,
+)
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
 
 
-def start_planning_timer(match: MatchState, *, now: datetime | None = None) -> MatchState:
+def resolution_buffer_seconds(num_events: int) -> int:
+    """Time to reserve for the client to animate `num_events` micro-steps."""
+    return min(MAX_RESOLVE_BUFFER_SECONDS, ceil(max(0, num_events) * RESOLVE_STEP_SECONDS))
+
+
+def start_planning_timer(
+    match: MatchState,
+    *,
+    now: datetime | None = None,
+    resolve_buffer_seconds: int = 0,
+) -> MatchState:
     started_at = _as_utc(now or datetime.now(UTC))
-    match.planning_deadline = started_at + timedelta(seconds=TURN_DURATION_SECONDS)
+    match.planning_deadline = started_at + timedelta(
+        seconds=resolve_buffer_seconds + TURN_DURATION_SECONDS
+    )
     return match
 
 

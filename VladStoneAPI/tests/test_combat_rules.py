@@ -198,6 +198,50 @@ def test_player_can_spawn_on_enemy_in_spawn_row_and_push_it_back() -> None:
     assert spawn_event.to_position == Position(row=4, col=1)
 
 
+def test_overkill_attack_is_not_wasted_on_a_doomed_target() -> None:
+    match = create_demo_match()
+    top_player = match.players[0]
+    bottom_player = match.players[1]
+    match.units = [
+        create_unit(
+            unit_id="top_ranger_a",
+            owner_id=top_player.id,
+            side=top_player.side,
+            card=RANGER_CARD,
+            position=Position(row=1, col=1),
+        ),
+        create_unit(
+            unit_id="top_ranger_b",
+            owner_id=top_player.id,
+            side=top_player.side,
+            card=RANGER_CARD,
+            position=Position(row=0, col=1),
+        ),
+        create_unit(
+            unit_id="bottom_target",
+            owner_id=bottom_player.id,
+            side=bottom_player.side,
+            card=RANGER_CARD,
+            position=Position(row=2, col=1),
+        ),
+    ]
+    match.units[0].stats = match.units[0].stats.model_copy(update={"attacks": 1})
+    match.units[1].stats = match.units[1].stats.model_copy(update={"attacks": 1})
+    match.units[2].current_hp = 1
+    match.units[2].stats = match.units[2].stats.model_copy(update={"attacks": 0})
+
+    resolved = resolve_turn(match)
+
+    attacks_on_target = [
+        event
+        for event in resolved.events
+        if event.type == CombatEventType.ATTACK and event.target_id == "bottom_target"
+    ]
+    # Only one attacker spends its hit on the 1-HP target; the other keeps its attack.
+    assert len(attacks_on_target) == 1
+    assert all(unit.id != "bottom_target" for unit in resolved.units)
+
+
 def test_ranger_does_not_move_when_attack_is_available() -> None:
     match = create_demo_match()
     match.units[0].position = Position(row=1, col=1)

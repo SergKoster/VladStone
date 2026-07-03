@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
+from app.domain.catalog import starter_catalog_payload
 from app.domain.combat.models import MatchLifecycleStatus, MatchState, PlayerSide, Position
 from app.domain.combat.rules import (
     apply_placements,
@@ -35,6 +36,11 @@ router = APIRouter(prefix="/combat", tags=["combat"])
 DbSession = Annotated[Session, Depends(get_db)]
 RefreshTokenCookie = Annotated[str | None, Cookie()]
 STALE_MATCH_TTL_HOURS = 24
+
+
+@router.get("/catalog")
+def get_card_catalog() -> dict:
+    return {"cards": starter_catalog_payload()}
 
 
 @router.get("/demo")
