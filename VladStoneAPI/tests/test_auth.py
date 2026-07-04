@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.domain.combat.cards import STARTER_CARDS
 from app.main import create_app
 
 
@@ -29,7 +30,7 @@ def test_email_code_login_and_collection() -> None:
     collection_response = client.get("/api/me/collection")
     assert collection_response.status_code == 200
     cards = collection_response.json()["cards"]
-    assert {card["id"] for card in cards} == {"test_bruiser", "test_ranger"}
+    assert {card["id"] for card in cards} == {card.id for card in STARTER_CARDS}
 
     ascend_response = client.post("/api/me/collection/test_bruiser/ascend", json={})
     assert ascend_response.status_code == 200

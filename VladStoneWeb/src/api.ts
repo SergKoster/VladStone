@@ -100,6 +100,10 @@ export type CombatMatch = {
     hero: { owner_id: string; side: "top" | "bottom"; hp: number };
   }>;
   units: CombatUnit[];
+  /** Cards currently in the player's hand (server-authoritative). */
+  player_hand: string[];
+  /** Cards left in the deck; the order is a server-side secret. */
+  deck_count: number;
   log: Array<{ message: string }>;
   events: CombatEvent[];
   result: {

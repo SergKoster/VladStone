@@ -135,6 +135,13 @@ class MatchState(BaseModel):
     planning_deadline: datetime | None = None
     players: list[PlayerState]
     units: list[UnitState] = Field(default_factory=list)
+    # Human player's deck cycle (MVP: single human player; PvP will move this
+    # into per-player state). Deck order is server-side secret — the API layer
+    # exposes only its size, never its order.
+    player_deck: list[str] = Field(default_factory=list)
+    player_hand: list[str] = Field(default_factory=list)
+    # How many units the test bot has spawned; drives its alternating pattern.
+    bot_spawn_count: int = Field(default=0, ge=0)
     log: list[CombatLogEntry] = Field(default_factory=list)
     events: list[CombatEvent] = Field(default_factory=list)
     result: MatchResult = Field(default_factory=MatchResult)

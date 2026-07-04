@@ -97,6 +97,61 @@ export function Battle({
   const availableMana = Math.max(0, playerMana - plannedCost);
   const nextMana = nextManaGain(match?.turn ?? 1);
 
+  // The hand is server-authoritative (deck cycle). Planned placements consume
+  // hand entries locally so a card cannot be planned twice.
+  const handEntries = React.useMemo(() => {
+    const plannedLeft: Record<string, number> = {};
+    placements.forEach((placement) => {
+      plannedLeft[placement.card_id] = (plannedLeft[placement.card_id] ?? 0) + 1;
+    });
+    return (match?.player_hand ?? []).map((cardId, index) => {
+      const card = cards.find((candidate) => candidate.id === cardId) ?? null;
+      let planned = false;
+      if ((plannedLeft[cardId] ?? 0) > 0) {
+        plannedLeft[cardId] -= 1;
+        planned = true;
+      }
+      return { key: `${cardId}-${index}`, cardId, card, planned };
+    });
+  }, [cards, match?.player_hand, placements]);
+
+  const deckCount = match?.deck_count ?? 0;
+
+  // Draw animation: when the turn advances, the freshly drawn card (the hand's
+  // last entry — the server appends draws) flies in from the deck stack.
+  const [drawnKey, setDrawnKey] = React.useState<string | null>(null);
+  const prevTurnRef = React.useRef(0);
+  React.useEffect(() => {
+    const turn = match?.turn ?? 0;
+    const hand = match?.player_hand ?? [];
+    // Any forward jump counts (the server may resolve turns by timer while the
+    // client is away); a fresh mount (prev 0) does not animate.
+    const isNextTurn = prevTurnRef.current > 0 && turn > prevTurnRef.current;
+    prevTurnRef.current = turn;
+    if (isNextTurn && hand.length > 0) {
+      setDrawnKey(`${hand[hand.length - 1]}-${hand.length - 1}`);
+      const timerId = window.setTimeout(() => setDrawnKey(null), 700);
+      return () => window.clearTimeout(timerId);
+    }
+    return undefined;
+  }, [match?.turn, match?.player_hand]);
+
+  // Transient warnings shown right on the clicked cell (fade up and out).
+  const [cellNotices, setCellNotices] = React.useState<
+    Array<{ key: number; row: number; col: number; text: string }>
+  >([]);
+  const noticeKeyRef = React.useRef(0);
+  const showCellNotice = React.useCallback(
+    (position: { row: number; col: number }, text: string) => {
+      const key = noticeKeyRef.current++;
+      setCellNotices((current) => [...current, { key, ...position, text }]);
+      window.setTimeout(() => {
+        setCellNotices((current) => current.filter((notice) => notice.key !== key));
+      }, 1100);
+    },
+    [],
+  );
+
   React.useEffect(() => {
     isRealtimeBusyRef.current = isResolving || isAnimating;
   }, [isAnimating, isResolving]);
@@ -445,18 +500,18 @@ export function Battle({
     }
     if (!selectedCard) {
       logBattleEvent("battle_cell_rejected", { reason: "no_selected_card", position });
-      setBattleMessage("Сначала выбери карту в руке.");
+      showCellNotice(position, "Сначала выбери карту в руке");
       return;
     }
     if (position.row !== 4) {
       logBattleEvent("battle_cell_rejected", { reason: "not_spawn_row", position });
-      setBattleMessage("Ставить юнитов пока можно только на ближайшие 3 клетки.");
+      showCellNotice(position, "Ставить можно только на ближайший ряд");
       return;
     }
     const existingUnit = unitAt(position.row, position.col);
     if (existingUnit?.side === "bottom") {
       logBattleEvent("battle_cell_rejected", { reason: "occupied", position });
-      setBattleMessage("Эта клетка уже занята.");
+      showCellNotice(position, "Клетка уже занята");
       return;
     }
     if (existingUnit?.side === "top" && unitAt(position.row - 1, position.col)) {
@@ -465,7 +520,7 @@ export function Battle({
         position,
         displacedUnitId: existingUnit.id,
       });
-      setBattleMessage("Этого врага некуда вытолкнуть: клетка за ним занята.");
+      showCellNotice(position, "Некуда вытолкнуть: клетка за врагом занята");
       return;
     }
     if (availableMana < selectedCard.cost) {
@@ -475,11 +530,13 @@ export function Battle({
         selectedCardId: selectedCard.id,
         availableMana,
       });
-      setBattleMessage("Не хватает маны.");
+      showCellNotice(position, "Не хватает маны");
       return;
     }
     const nextPlacements = [...placements, { card_id: selectedCard.id, ...position }];
     setPlacements(nextPlacements);
+    // The planned card is consumed from the hand until the plan is cancelled.
+    setSelectedCard(null);
     logClientEvent(
       "battle_plan_added",
       battleSnapshot(match, nextPlacements, {
@@ -571,6 +628,15 @@ export function Battle({
             {popups.map((popup) => (
               <DamagePopupView key={popup.key} popup={popup} />
             ))}
+            {cellNotices.map((notice) => (
+              <span
+                className="cell-notice"
+                key={notice.key}
+                style={{ ["--col"]: notice.col, ["--row"]: notice.row } as React.CSSProperties}
+              >
+                <span>{notice.text}</span>
+              </span>
+            ))}
           </div>
         </div>
         <div className={activeEvent?.target_id === "player" ? "hero-line hit" : "hero-line"}>
@@ -593,16 +659,37 @@ export function Battle({
           </div>
         </div>
         <section className="hand compact-hand">
-          {cards.map((card) => (
-            <button
-              className={selectedCard?.id === card.id ? "hand-card active" : "hand-card"}
-              disabled={isResolving || isAnimating || isFinished}
-              key={card.id}
-              onClick={() => handleSelectCard(card)}
+          {handEntries.map((entry) =>
+            entry.card ? (
+              <button
+                className={[
+                  "hand-card",
+                  selectedCard?.id === entry.cardId && !entry.planned ? "active" : "",
+                  entry.planned ? "planned" : "",
+                  entry.key === drawnKey ? "drawn" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                disabled={isResolving || isAnimating || isFinished || entry.planned}
+                key={entry.key}
+                onClick={() => handleSelectCard(entry.card!)}
+              >
+                <Card card={entry.card} />
+              </button>
+            ) : null,
+          )}
+          {match ? (
+            <div
+              aria-label={`Карт в колоде: ${deckCount}`}
+              className={deckCount > 0 ? "deck-stack" : "deck-stack empty"}
+              title="Карт в колоде"
             >
-              <Card card={card} />
-            </button>
-          ))}
+              <strong>{deckCount}</strong>
+              <span>колода</span>
+            </div>
+          ) : (
+            <p className="hand-hint">Нажми «Старт», чтобы получить руку из колоды.</p>
+          )}
         </section>
         <button disabled={!match || isResolving || isAnimating || isFinished} onClick={() => void handleResolve()}>
           {isResolving ? "Резолв..." : isAnimating ? "Идёт ход..." : "Завершить ход"}

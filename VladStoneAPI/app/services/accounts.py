@@ -58,7 +58,11 @@ def get_or_create_user_for_identity(
         )
     )
     if identity is not None:
-        return db.get(User, identity.user_id)
+        user = db.get(User, identity.user_id)
+        # Idempotent top-up: existing accounts receive any starter cards that
+        # were added to the catalog after they signed up.
+        grant_starter_collection(db, user.id)
+        return user
 
     user = db.scalar(select(User).where(User.email == normalized_email))
     if user is None:
@@ -66,8 +70,8 @@ def get_or_create_user_for_identity(
         db.add(user)
         db.flush()
         db.add(PlayerProfile(user_id=user.id))
-        grant_starter_collection(db, user.id)
         audit(db, user.id, "user.created", {"provider": provider.value})
+    grant_starter_collection(db, user.id)
 
     db.add(
         AuthIdentity(

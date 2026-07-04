@@ -11,10 +11,20 @@ type SnapshotPlayers = NonNullable<CombatEvent["snapshot"]["players"]>;
  */
 function mergeUnitsHp(current: CombatUnit[], snapshot: CombatUnit[]): CombatUnit[] {
   const byId = new Map(current.map((unit) => [unit.id, unit]));
-  return snapshot.map((unit) => {
+  const merged = snapshot.map((unit) => {
     const prev = byId.get(unit.id);
     return prev ? { ...unit, current_hp: Math.min(prev.current_hp, unit.current_hp) } : unit;
   });
+  // Snapshots taken after damage was applied already exclude freshly dead
+  // units, but their death event has not played yet — keep them on the board
+  // so the death animation can run (the final state removes them at the end).
+  const snapshotIds = new Set(snapshot.map((unit) => unit.id));
+  current.forEach((unit) => {
+    if (!snapshotIds.has(unit.id)) {
+      merged.push(unit);
+    }
+  });
+  return merged;
 }
 
 function mergePlayersHp(current: CombatMatch["players"], snapshot: SnapshotPlayers) {

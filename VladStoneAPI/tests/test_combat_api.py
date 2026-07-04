@@ -36,31 +36,57 @@ def test_start_and_resolve_combat_turn() -> None:
     match = start_response.json()["match"]
     assert match["turn"] == 1
     assert match["status"] == "planning"
+    # Deck cycle: hand of 3 dealt from the shuffled deck, order kept secret.
+    assert len(match["player_hand"]) == 3
+    assert match["deck_count"] == 4
+    assert "player_deck" not in match
 
     get_response = client.get(f"/api/combat/{match['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["match"]["id"] == match["id"]
 
-    resolve_response = client.post(
+    # Playing a card that is not in hand is rejected.
+    off_hand = next(
+        card_id
+        for card_id in ["banka", "test_ranger", "test_bruiser", "dolbiki"]
+        if card_id not in match["player_hand"]
+    )
+    rejected = client.post(
         "/api/combat/resolve",
         json={
             "match_id": match["id"],
             "turn": match["turn"],
-            "placements": [
-                {
-                    "card_id": "test_ranger",
-                    "row": 4,
-                    "col": 1,
-                }
-            ],
+            "placements": [{"card_id": off_hand, "row": 4, "col": 1}],
         },
+    )
+    assert rejected.status_code == 409
+
+    # Play the cheapest card actually in hand (starting mana is 2).
+    cards_by_id = {
+        card["id"]: card for card in client.get("/api/combat/catalog").json()["cards"]
+    }
+    playable = min(match["player_hand"], key=lambda card_id: cards_by_id[card_id]["cost"])
+    placements = (
+        [{"card_id": playable, "row": 4, "col": 1}]
+        if cards_by_id[playable]["cost"] <= 2
+        else []
+    )
+    resolve_response = client.post(
+        "/api/combat/resolve",
+        json={"match_id": match["id"], "turn": match["turn"], "placements": placements},
     )
     assert resolve_response.status_code == 200
     resolved = resolve_response.json()["match"]
     assert resolved["turn"] == 2
     assert resolved["status"] == "planning"
-    assert resolved["units"]
-    assert resolved["log"]
+    # Every played card ends up as a unit on the board (and in the log).
+    if placements:
+        assert resolved["units"]
+        assert resolved["log"]
+    # End of turn draws one card back into the hand.
+    expected_hand = 3 - len(placements) + 1
+    assert len(resolved["player_hand"]) == expected_hand
+    assert resolved["deck_count"] == 3
 
     stale_response = client.post(
         "/api/combat/resolve",
@@ -191,7 +217,18 @@ def test_match_websocket_receives_snapshot_ping_and_updates() -> None:
         assert update["type"] == "match.updated"
         assert update["match"]["id"] == started["id"]
         assert update["match"]["turn"] == 2
-        assert update["events"]
+
+        # Turn 2: the bot has saved 3 mana and spawns its bruiser — the update
+        # must carry the spawn events for animation.
+        second_resolve = client.post(
+            "/api/combat/resolve",
+            json={"match_id": started["id"], "turn": 2, "placements": []},
+        )
+        assert second_resolve.status_code == 200
+        second_update = websocket.receive_json()
+        assert second_update["type"] == "match.updated"
+        assert second_update["match"]["turn"] == 3
+        assert second_update["events"]
 
 
 def test_late_combat_actions_are_rejected_after_server_deadline() -> None:

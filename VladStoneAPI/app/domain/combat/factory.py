@@ -4,6 +4,7 @@ from uuid import uuid4
 from app.domain.combat.board import add_turn_mana
 from app.domain.combat.cards import BRUISER_CARD, RANGER_CARD
 from app.domain.combat.constants import RULESET_VERSION
+from app.domain.combat.deck import init_player_deck
 from app.domain.combat.models import (
     CardDefinition,
     HeroState,
@@ -91,4 +92,5 @@ def create_player_match(*, now: datetime | None = None) -> MatchState:
         ruleset_version=RULESET_VERSION,
         players=[bot, player],
     )
+    init_player_deck(match)
     return start_planning_timer(match, now=now)

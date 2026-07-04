@@ -25,14 +25,18 @@ export function nextManaGain(currentTurn: number) {
   return 1;
 }
 
+const SHORT_CARD_NAMES: Record<string, string> = {
+  test_bruiser: "Толстяк",
+  test_ranger: "Дальник",
+  banka: "Банка",
+  dolbiki: "Долбики",
+  matesha: "Матеша",
+  matesha_plus: "Матеша+",
+  zadanie: "Задание",
+};
+
 export function shortCardName(cardId: string) {
-  if (cardId === "test_bruiser") {
-    return "Толстяк";
-  }
-  if (cardId === "test_ranger") {
-    return "Дальник";
-  }
-  return cardId;
+  return SHORT_CARD_NAMES[cardId] ?? cardId;
 }
 
 export function battleSnapshot(

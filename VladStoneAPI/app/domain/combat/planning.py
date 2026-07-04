@@ -19,11 +19,14 @@ def apply_placements(
     *,
     owner_id: str,
     side: PlayerSide,
+    from_hand: bool = False,
 ) -> MatchState:
     updated = match.model_copy(deep=True)
     player = player_by_id(updated, owner_id)
     for index, (card_id, position) in enumerate(placements):
         card = CARD_BY_ID[card_id]
+        if from_hand and card_id not in updated.player_hand:
+            continue
         if player.mana < card.cost:
             continue
         if not is_valid_spawn_position(side, position, updated.rows):
@@ -61,6 +64,8 @@ def apply_placements(
                 target_kind=CombatTargetKind.CELL,
             )
         player.mana -= card.cost
+        if from_hand:
+            updated.player_hand.remove(card_id)
         unit = create_unit(
             unit_id=f"{owner_id}_{updated.turn}_{index}_{len(updated.units)}",
             owner_id=owner_id,

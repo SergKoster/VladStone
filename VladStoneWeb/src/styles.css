@@ -587,6 +587,54 @@ nav {
   }
 }
 
+/* Transient warning pinned to the clicked cell: fades in, drifts up, fades out. */
+.cell-notice {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 12;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  display: grid;
+  place-items: center;
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  pointer-events: none;
+}
+
+.cell-notice > span {
+  width: max-content;
+  max-width: 200px;
+  padding: 0.32em 0.6em;
+  border-radius: 6px;
+  background: rgb(18 26 22 / 0.86);
+  color: #f8faf6;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+  animation: notice-float 1.05s ease-out forwards;
+}
+
+@keyframes notice-float {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-18px);
+  }
+}
+
 .board-cell {
   position: relative;
   display: grid;
@@ -762,6 +810,65 @@ nav {
 .hand-card.active {
   outline: 3px solid #2f7fd0;
   outline-offset: 1px;
+}
+
+/* Hand card already planned onto the board this turn. */
+.hand-card.planned {
+  opacity: 0.4;
+}
+
+/* Freshly drawn card flies in from the deck stack (sits to the right). */
+.hand-card.drawn {
+  animation: card-draw 620ms cubic-bezier(0.2, 0.85, 0.3, 1);
+}
+
+@keyframes card-draw {
+  from {
+    opacity: 0;
+    transform: translateX(85%) translateY(-4%) rotate(7deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Face-down deck: stacked card back with a "cards left" counter. */
+.deck-stack {
+  display: grid;
+  gap: 2px;
+  place-content: center;
+  place-items: center;
+  aspect-ratio: 4 / 5;
+  border: 1px solid #244d3f;
+  border-radius: 10px;
+  background: #2d5f4d;
+  color: #f8faf6;
+  box-shadow:
+    3px 3px 0 #24503f,
+    6px 6px 0 #1b4032;
+}
+
+.deck-stack strong {
+  font-size: 1.3rem;
+}
+
+.deck-stack span {
+  font-size: 0.68rem;
+  opacity: 0.75;
+}
+
+.deck-stack.empty {
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.hand-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #66746b;
+  font-size: 0.88rem;
+  text-align: center;
 }
 
 .compact-hand {

@@ -40,8 +40,16 @@ function App() {
     [authUser?.id],
     [],
   );
+  // Full card catalog: battle needs stats for any card id (hand, bot units),
+  // regardless of what the player owns.
+  const catalogState = useServerResource<CollectionCard[]>(
+    () => getCardCatalog().then((payload) => payload.cards),
+    [],
+    [],
+  );
   const profile = profileState.data;
   const collection = collectionState.data;
+  const catalog = catalogState.data;
 
   async function handleRequestCode() {
     setAuthMessage("");
@@ -139,7 +147,7 @@ function App() {
         )}
         {route === "battle" && (
           <Battle
-            cards={collection}
+            cards={catalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
         )}

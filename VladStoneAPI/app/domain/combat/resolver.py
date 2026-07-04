@@ -3,6 +3,7 @@ from datetime import datetime
 from app.domain.combat.attacks import AttackIntent, apply_attack_intents, attack_intent
 from app.domain.combat.board import add_turn_mana
 from app.domain.combat.constants import BOARD_ROWS
+from app.domain.combat.deck import draw_card
 from app.domain.combat.lifecycle import finish_match_if_needed, remove_dead_units
 from app.domain.combat.models import ActionPriority, MatchLifecycleStatus, MatchState
 from app.domain.combat.movement import MoveIntent, apply_move_intents, move_intent
@@ -36,6 +37,13 @@ def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchStat
         resolved.turn += 1
         for player in resolved.players:
             player.mana = add_turn_mana(player.mana, resolved.turn, resolved.mana_cap)
+        # Planning shows the next turn's full action budget, not the drained
+        # values left over from resolution (they are reset again on resolve).
+        for unit in resolved.units:
+            unit.remaining_steps = unit.stats.move_steps
+            unit.remaining_attacks = unit.stats.attacks
+        # End of turn: the player draws the next card from the deck cycle.
+        draw_card(resolved)
         resolved.status = MatchLifecycleStatus.PLANNING
         # Freeze planning until the resolution animation has had time to play.
         buffer = resolution_buffer_seconds(len(resolved.events))

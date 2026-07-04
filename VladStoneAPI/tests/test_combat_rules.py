@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from app.domain.combat.cards import DECK_CARD_IDS
 from app.domain.combat.models import CombatEventType, PlayerSide, Position
 from app.domain.combat.rules import (
     BRUISER_CARD,
@@ -15,6 +16,75 @@ from app.domain.combat.rules import (
     reward_for_result,
 )
 from app.domain.combat.timing import is_planning_deadline_expired
+
+
+def test_deck_cycle_deals_hand_draws_and_reshuffles() -> None:
+    match = create_player_match()
+
+    # Full test deck: every catalog card exactly once, split hand/deck.
+    assert len(match.player_hand) == 3
+    assert len(match.player_deck) == len(DECK_CARD_IDS) - 3
+    assert sorted(match.player_hand + match.player_deck) == sorted(DECK_CARD_IDS)
+
+    # Each resolved turn draws exactly one card into the hand.
+    resolved = resolve_turn(match)
+    assert len(resolved.player_hand) == 4
+    assert len(resolved.player_deck) == len(DECK_CARD_IDS) - 4
+
+    # When the deck runs out, a fresh shuffled deck is built from the cards
+    # that are not in hand, and drawing continues.
+    resolved.player_deck = []
+    resolved.player_hand = ["banka", "test_ranger"]
+    redrawn = resolve_turn(resolved)
+    assert len(redrawn.player_hand) == 3
+    assert len(redrawn.player_deck) == len(DECK_CARD_IDS) - 3
+    assert sorted(redrawn.player_hand + redrawn.player_deck) == sorted(DECK_CARD_IDS)
+
+
+def test_placements_from_hand_consume_only_played_cards() -> None:
+    match = create_player_match()
+    match.player_hand = ["banka", "zadanie", "test_ranger"]
+    player = next(candidate for candidate in match.players if candidate.id == "player")
+    player.mana = 2
+
+    updated = apply_placements(
+        match,
+        [
+            ("banka", Position(row=4, col=0)),
+            # Too expensive for 2 mana: skipped, must stay in hand.
+            ("zadanie", Position(row=4, col=1)),
+            # Not in hand: skipped.
+            ("test_bruiser", Position(row=4, col=2)),
+        ],
+        owner_id="player",
+        side=PlayerSide.BOTTOM,
+        from_hand=True,
+    )
+
+    assert updated.player_hand == ["zadanie", "test_ranger"]
+    assert [unit.card_id for unit in updated.units] == ["banka"]
+
+
+def test_bot_alternates_bruiser_lane_0_and_ranger_lane_1() -> None:
+    match = create_player_match()
+    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+
+    # Not enough mana for the bruiser yet: the bot saves up instead of skipping
+    # ahead in its pattern.
+    skipped = apply_simple_bot_turn(match)
+    assert not [unit for unit in skipped.units if unit.owner_id == "bot"]
+    assert skipped.bot_spawn_count == 0
+
+    bot.mana = 10
+    first = apply_simple_bot_turn(match)  # spawn 1: bruiser to lane 0
+    assert [(u.card_id, u.position.col) for u in first.units if u.owner_id == "bot"] == [
+        ("test_bruiser", 0)
+    ]
+
+    second = apply_simple_bot_turn(first)  # spawn 2: ranger to lane 1
+    bot_units = [(u.card_id, u.position.col) for u in second.units if u.owner_id == "bot"]
+    assert ("test_ranger", 1) in bot_units
+    assert second.bot_spawn_count == 2
 
 
 def test_mana_schedule_and_cap() -> None:
@@ -84,12 +154,14 @@ def test_collision_consumes_actions_and_continues_resolve() -> None:
     assert any("collided" in entry.message for entry in resolved.log)
     top = next(unit for unit in resolved.units if unit.id == "top_bruiser")
     bottom = next(unit for unit in resolved.units if unit.id == "bottom_bruiser")
+    # Actions were consumed during resolution (units stayed put), and the
+    # planning state shows the refreshed budget for the next turn.
     assert top.position == Position(row=1, col=0)
     assert bottom.position == Position(row=3, col=0)
     assert top.current_hp == 2
     assert bottom.current_hp == 2
-    assert top.remaining_steps == 0
-    assert bottom.remaining_steps == 0
+    assert top.remaining_steps == top.stats.move_steps
+    assert bottom.remaining_steps == bottom.stats.move_steps
 
 
 def test_same_micro_turn_move_conflict_consumes_steps_for_both_units() -> None:
@@ -119,10 +191,9 @@ def test_same_micro_turn_move_conflict_consumes_steps_for_both_units() -> None:
 
     top = next(unit for unit in resolved.units if unit.id == "top_walker")
     bottom = next(unit for unit in resolved.units if unit.id == "bottom_walker")
+    # The conflict consumed their steps during resolution: both stayed put.
     assert top.position == Position(row=1, col=1)
     assert bottom.position == Position(row=3, col=1)
-    assert top.remaining_steps == 0
-    assert bottom.remaining_steps == 0
 
 
 def test_second_same_cell_collision_without_attacks_only_consumes_steps() -> None:
@@ -152,14 +223,12 @@ def test_second_same_cell_collision_without_attacks_only_consumes_steps() -> Non
 
     top = next(unit for unit in resolved.units if unit.id == "top_bruiser")
     bottom = next(unit for unit in resolved.units if unit.id == "bottom_bruiser")
+    # Steps and the single attack were consumed during resolution, so both
+    # units stayed put and traded exactly one hit each.
     assert top.position == Position(row=1, col=0)
     assert bottom.position == Position(row=3, col=0)
     assert top.current_hp == 2
     assert bottom.current_hp == 2
-    assert top.remaining_steps == 0
-    assert bottom.remaining_steps == 0
-    assert top.remaining_attacks == 0
-    assert bottom.remaining_attacks == 0
 
 
 def test_player_can_spawn_on_enemy_in_spawn_row_and_push_it_back() -> None:

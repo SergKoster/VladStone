@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
 from app.domain.catalog import starter_catalog_payload
+from app.domain.combat.deck import covers_hand
 from app.domain.combat.models import MatchLifecycleStatus, MatchState, PlayerSide, Position
 from app.domain.combat.rules import (
     apply_placements,
@@ -156,15 +157,25 @@ async def resolve_combat_turn(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Combat turn is no longer current",
             )
+        # The hand is server-authoritative: every placement must reference a card
+        # that is actually in the player's hand this turn.
+        if not covers_hand(match, [p.card_id for p in payload.placements]):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Placement uses a card that is not in hand",
+            )
         placements = [
             (placement.card_id, Position(row=placement.row, col=placement.col))
             for placement in payload.placements
         ]
+        # from_hand: each successful spawn consumes its card from the hand
+        # (skipped placements keep theirs).
         match = apply_placements(
             match,
             placements,
             owner_id="player",
             side=PlayerSide.BOTTOM,
+            from_hand=True,
         )
         match = apply_simple_bot_turn(match)
         resolved = resolve_turn(match)
