@@ -36,6 +36,11 @@ export const STRIKE_IMPACT = 0.42;
 // Extra pause inserted after each animated micro-step so turns are easy to follow.
 const INTER_STEP_PAUSE = 280;
 
+// Hard cap on "no animation progress": if no event advances for this long, the
+// battle watchdog force-finishes the turn. Generously above the longest single
+// event (slow strike ~1.2s + pause) so it only catches genuine hangs.
+export const ANIMATION_WATCHDOG_MS = 10_000;
+
 const STORAGE_KEY = "vladstone:animation-speed";
 
 export function prefersReducedMotion(): boolean {

@@ -19,6 +19,7 @@ import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
 import { applyEventHp, applyEventSnapshot, wait } from "./animationState";
 import {
   type AnimationSpeed,
+  ANIMATION_WATCHDOG_MS,
   STRIKE_IMPACT,
   durationFor,
   layerTimings,
@@ -261,12 +262,80 @@ export function Battle({
     return () => window.clearInterval(timerId);
   }, [isAnimating, isFinished, isTimerRunning, match]);
 
+  // One auto-submit attempt per turn: the ref survives re-renders, so the
+  // 1s -> 0s tick does not fire a duplicate resolve while the first is in flight.
+  const autoSubmitTurnRef = React.useRef<number | null>(null);
+  // The state the current animation is playing towards; the watchdog lands on
+  // it when the animation pipeline hangs instead of finishing.
+  const latestFinalMatchRef = React.useRef<CombatMatch | null>(null);
+
+  // Watchdog: a hung animation would freeze the battle in "Идёт ход" forever —
+  // the turn timer stops and realtime updates get dropped as "busy", so there
+  // is no other way out. If no animation event progresses for the whole cap,
+  // force-finish and report which event stalled (battle_animation_watchdog in
+  // telemetry) so freezes identify themselves in the dev logs.
   React.useEffect(() => {
-    if (isTimerRunning && secondsLeft === 0) {
+    if (!isAnimating) {
+      return undefined;
+    }
+    const watchdogId = window.setTimeout(() => {
+      logClientEvent(
+        "battle_animation_watchdog",
+        battleSnapshot(latestFinalMatchRef.current ?? match, [], {
+          stalledEventType: activeEvent?.type ?? null,
+          stalledEventSequence: activeEvent?.sequence ?? null,
+        }),
+      );
+      if (latestFinalMatchRef.current) {
+        setMatch(latestFinalMatchRef.current);
+      }
+      setActiveEvent(null);
+      resetEffects();
+      setIsAnimating(false);
+      setBattleMessage("Анимация зависла — показан итог хода.");
+    }, ANIMATION_WATCHDOG_MS);
+    return () => window.clearTimeout(watchdogId);
+    // activeEvent in deps restarts the countdown on every played event, so the
+    // watchdog only fires when the pipeline makes no progress at all.
+  }, [activeEvent, isAnimating]);
+
+  React.useEffect(() => {
+    if (!isTimerRunning || !match || isFinished) {
+      return;
+    }
+    // <= 2, not <= 1: the countdown is ceil()-ed, so a displayed "1" can mean
+    // mere milliseconds remain and the server may win the race (verified live:
+    // submitting at "1" got a 409). "2" guarantees at least a full second.
+    const shouldAutoSubmit =
+      secondsLeft <= 2 &&
+      placements.length > 0 &&
+      !isResolving &&
+      !isAnimating &&
+      autoSubmitTurnRef.current !== match.turn;
+    if (shouldAutoSubmit) {
+      // The player staged placements but never pressed "resolve": submit them
+      // before the server resolves the expired turn as an empty one and the
+      // staged plan is silently lost (PLAYTEST_NOTES item 2).
+      autoSubmitTurnRef.current = match.turn;
+      logBattleEvent("battle_timer_autosubmit");
+      setBattleMessage("Время вышло — отправляю твою расстановку.");
+      void handleResolve();
+      return;
+    }
+    if (secondsLeft === 0) {
       logBattleEvent("battle_timer_zero");
       setBattleMessage("Время вышло. Сервер разыгрывает ход.");
     }
-  }, [isTimerRunning, secondsLeft]);
+  }, [
+    handleResolve,
+    isAnimating,
+    isFinished,
+    isResolving,
+    isTimerRunning,
+    match,
+    placements,
+    secondsLeft,
+  ]);
 
   async function handleStartBattle() {
     logBattleEvent("battle_start_clicked");
@@ -402,74 +471,82 @@ export function Battle({
     }
 
     const speed = ANIMATION_SPEED;
+    latestFinalMatchRef.current = finalMatch;
     setIsAnimating(true);
 
-    // Fallback for debug/reduced motion: jump straight to the resolved state.
-    if (speed === "off" || prefersReducedMotion()) {
-      events.forEach(dropSpawnedPlacement);
+    try {
+      // Fallback for debug/reduced motion: jump straight to the resolved state.
+      if (speed === "off" || prefersReducedMotion()) {
+        events.forEach(dropSpawnedPlacement);
+        return;
+      }
+
+      const pause = pauseFor(speed);
+      let index = 0;
+      while (index < events.length) {
+        const event = events[index];
+        setActiveEvent(event);
+        setBattleMessage(event.message);
+
+        // Collision cluster: consecutive collision events on the same cell play
+        // together so both contenders leap into the tile from their own sides.
+        // The cluster's last event holds the post-collision HP, applied at impact.
+        if (isCollision(event)) {
+          const cell = event.to_position;
+          const group: CombatEvent[] = [];
+          while (
+            index < events.length &&
+            isCollision(events[index]) &&
+            samePosition(events[index].to_position, cell)
+          ) {
+            group.push(events[index]);
+            index += 1;
+          }
+          await playLunge(
+            group.filter((entry) => entry.actor_id),
+            group[group.length - 1],
+            finalMatch,
+          );
+          await wait(pause);
+          continue;
+        }
+
+        // Melee/ranged strike: keep the board as-is until the attacker lands, then
+        // playLunge applies the hit (HP) in sync with the animation.
+        if (isMeleeLunge(event)) {
+          await playLunge([event], event, finalMatch);
+          await wait(pause);
+          index += 1;
+          continue;
+        }
+
+        applyEventToBoard(event, finalMatch);
+
+        if (event.type === "death") {
+          await wait(durationFor("death", speed));
+          await wait(pause);
+          index += 1;
+          continue;
+        }
+
+        await wait(durationFor(event.type, speed));
+        await wait(pause);
+        index += 1;
+      }
+    } catch (error) {
+      logClientEvent(
+        "battle_animation_error",
+        battleSnapshot(finalMatch, [], { error: String(error) }),
+      );
+    } finally {
+      // Whatever happened above — finished, threw, or was cut short — the
+      // battle must never stay locked in "Идёт ход": land on the authoritative
+      // final state and unlock the UI (timer, hand, resolve button).
       setMatch(finalMatch);
       setActiveEvent(null);
       resetEffects();
       setIsAnimating(false);
-      if (finalMatch.result.status === "finished") {
-        onBattleFinished();
-      }
-      return;
     }
-
-    const pause = pauseFor(speed);
-    let index = 0;
-    while (index < events.length) {
-      const event = events[index];
-      setActiveEvent(event);
-      setBattleMessage(event.message);
-
-      // Collision cluster: consecutive collision events on the same cell play
-      // together so both contenders leap into the tile from their own sides.
-      // The cluster's last event holds the post-collision HP, applied at impact.
-      if (isCollision(event)) {
-        const cell = event.to_position;
-        const group: CombatEvent[] = [];
-        while (
-          index < events.length &&
-          isCollision(events[index]) &&
-          samePosition(events[index].to_position, cell)
-        ) {
-          group.push(events[index]);
-          index += 1;
-        }
-        await playLunge(group.filter((entry) => entry.actor_id), group[group.length - 1], finalMatch);
-        await wait(pause);
-        continue;
-      }
-
-      // Melee/ranged strike: keep the board as-is until the attacker lands, then
-      // playLunge applies the hit (HP) in sync with the animation.
-      if (isMeleeLunge(event)) {
-        await playLunge([event], event, finalMatch);
-        await wait(pause);
-        index += 1;
-        continue;
-      }
-
-      applyEventToBoard(event, finalMatch);
-
-      if (event.type === "death") {
-        await wait(durationFor("death", speed));
-        await wait(pause);
-        index += 1;
-        continue;
-      }
-
-      await wait(durationFor(event.type, speed));
-      await wait(pause);
-      index += 1;
-    }
-
-    setMatch(finalMatch);
-    setActiveEvent(null);
-    resetEffects();
-    setIsAnimating(false);
     if (finalMatch.result.status === "finished") {
       onBattleFinished();
     }
