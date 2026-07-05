@@ -142,6 +142,11 @@ class CombatMatchRecord(Base):
     __tablename__ = "combat_matches"
 
     id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    # Optimistic lock: every UPDATE goes out as "... WHERE version = <loaded>",
+    # so of two concurrent resolvers (route vs timer worker) only the first
+    # write lands; the loser gets StaleDataError instead of silently
+    # overwriting the state (ARCHITECTURE §8.6).
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     owner_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
@@ -159,3 +164,5 @@ class CombatMatchRecord(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+    __mapper_args__ = {"version_id_col": version}

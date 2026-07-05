@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models import CombatMatchRecord
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
@@ -47,7 +48,15 @@ def resolve_expired_planning_matches(
     )
     resolved_matches: list[MatchState] = []
     for record in records:
-        resolved = resolve_expired_planning_match(db, record, now=checked_at)
-        if resolved is not None:
-            resolved_matches.append(resolved)
+        # Commit per match: an optimistic-lock conflict on one match (someone
+        # resolved it concurrently) must not discard the other resolves.
+        try:
+            resolved = resolve_expired_planning_match(db, record, now=checked_at)
+            if resolved is None:
+                continue
+            db.commit()
+        except StaleDataError:
+            db.rollback()
+            continue
+        resolved_matches.append(resolved)
     return resolved_matches

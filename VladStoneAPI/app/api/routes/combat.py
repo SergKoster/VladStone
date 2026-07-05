@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
@@ -186,50 +187,61 @@ async def resolve_combat_turn(
             detail=f"Combat match is {match.status}",
         )
 
-    reward_claimed = user is not None and claim_combat_reward(db, match=resolved, user_id=user.id)
-    audit(
-        db,
-        user.id if user else None,
-        "combat.turn_resolved",
-        {
-            "match_id": resolved.id,
-            "turn": payload.turn,
-            "next_turn": resolved.turn,
-            "status": resolved.status.value,
-            "events_count": len(resolved.events),
-        },
-    )
-    if resolved.result.status == "finished":
+    try:
+        reward_claimed = user is not None and claim_combat_reward(
+            db, match=resolved, user_id=user.id
+        )
         audit(
             db,
             user.id if user else None,
-            "combat.match_finished",
+            "combat.turn_resolved",
             {
                 "match_id": resolved.id,
-                "winner_id": resolved.result.winner_id,
-                "reward_coins": resolved.result.reward_coins,
+                "turn": payload.turn,
+                "next_turn": resolved.turn,
+                "status": resolved.status.value,
+                "events_count": len(resolved.events),
             },
         )
-    if reward_claimed:
-        audit(
-            db,
-            user.id if user else None,
-            "combat.reward_claimed",
-            {
-                "match_id": resolved.id,
-                "coins": resolved.result.reward_coins,
-            },
-        )
-        append_dev_log(
-            "combat-server.jsonl",
-            "combat_reward_claimed",
-            {
-                "match_id": resolved.id,
-                "user_id": user.id,
-                "coins": resolved.result.reward_coins,
-            },
-        )
-    db.commit()
+        if resolved.result.status == "finished":
+            audit(
+                db,
+                user.id if user else None,
+                "combat.match_finished",
+                {
+                    "match_id": resolved.id,
+                    "winner_id": resolved.result.winner_id,
+                    "reward_coins": resolved.result.reward_coins,
+                },
+            )
+        if reward_claimed:
+            audit(
+                db,
+                user.id if user else None,
+                "combat.reward_claimed",
+                {
+                    "match_id": resolved.id,
+                    "coins": resolved.result.reward_coins,
+                },
+            )
+            append_dev_log(
+                "combat-server.jsonl",
+                "combat_reward_claimed",
+                {
+                    "match_id": resolved.id,
+                    "user_id": user.id,
+                    "coins": resolved.result.reward_coins,
+                },
+            )
+        db.commit()
+    except StaleDataError:
+        # A concurrent resolver (timer worker or a duplicate request) saved
+        # this match first; drop our attempt — their result is authoritative.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat turn was already resolved elsewhere",
+        ) from None
     append_dev_log(
         "combat-server.jsonl",
         "combat_resolve_response",
@@ -279,20 +291,27 @@ def _expire_record_if_stale(db: Session, record) -> None:
 
 
 def _resolve_expired_record_if_needed(db: Session, record) -> MatchState | None:
-    resolved = resolve_expired_planning_match(db, record)
-    if resolved is None:
+    try:
+        resolved = resolve_expired_planning_match(db, record)
+        if resolved is None:
+            return None
+        audit(
+            db,
+            record.owner_user_id,
+            "combat.turn_deadline_resolved",
+            {
+                "match_id": resolved.id,
+                "turn": resolved.turn,
+                "status": resolved.status.value,
+            },
+        )
+        db.commit()
+    except StaleDataError:
+        # Someone else resolved this match first; re-read their state and
+        # behave as if no deadline resolve was needed here.
+        db.rollback()
+        db.refresh(record)
         return None
-    audit(
-        db,
-        record.owner_user_id,
-        "combat.turn_deadline_resolved",
-        {
-            "match_id": resolved.id,
-            "turn": resolved.turn,
-            "status": resolved.status.value,
-        },
-    )
-    db.commit()
     append_dev_log(
         "combat-server.jsonl",
         "combat_turn_deadline_resolved",
