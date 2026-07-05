@@ -1,4 +1,4 @@
-import { createWebSocket, request, sendClientEvent } from "./shared/apiClient";
+import { API_BASE_URL, createWebSocket, request, sendClientEvent } from "./shared/apiClient";
 
 export type AuthUser = {
   id: number;
@@ -147,6 +147,22 @@ export function googleDevLogin(email: string) {
     method: "POST",
     body: JSON.stringify({ email }),
   });
+}
+
+export type AuthProviders = {
+  google: boolean;
+  dev_login: boolean;
+  email_code: boolean;
+};
+
+export function getAuthProviders() {
+  return request<AuthProviders>("/auth/providers");
+}
+
+// Real Google OAuth is a full-page redirect, not a fetch: the browser must
+// follow the API -> Google -> API chain so Google can show its consent screen.
+export function googleLoginUrl() {
+  return `${API_BASE_URL}/auth/google/login`;
 }
 
 export function getMe() {

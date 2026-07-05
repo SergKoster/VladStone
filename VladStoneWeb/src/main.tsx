@@ -3,12 +3,15 @@ import { createRoot } from "react-dom/client";
 
 import "./styles.css";
 import {
+  type AuthProviders,
   type AuthUser,
   type CollectionCard,
+  getAuthProviders,
   getCardCatalog,
   getCollection,
   getMe,
   googleDevLogin,
+  googleLoginUrl,
   logout,
   requestEmailCode,
   verifyEmailCode,
@@ -29,6 +32,31 @@ function App() {
   const [devCode, setDevCode] = React.useState<string | null>(null);
   const [authUser, setAuthUser] = React.useState<AuthUser | null>(null);
   const [authMessage, setAuthMessage] = React.useState("");
+  const [sessionChecked, setSessionChecked] = React.useState(false);
+  const [providers, setProviders] = React.useState<AuthProviders | null>(null);
+
+  React.useEffect(() => {
+    // The refresh cookie may already hold a live session: page reload or the
+    // return leg of the Google OAuth redirect. Restore it before showing auth.
+    getMe()
+      .then((profile) => setAuthUser({ id: profile.id, email: profile.email }))
+      .catch(() => undefined)
+      .finally(() => setSessionChecked(true));
+    getAuthProviders()
+      .then(setProviders)
+      .catch(() => undefined);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("auth_error")) {
+      setAuthMessage("Не удалось войти через Google. Попробуй еще раз.");
+      params.delete("auth_error");
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+      );
+    }
+  }, []);
   const profileState = useServerResource(
     () => (authUser ? getMe() : Promise.resolve(null)),
     [authUser?.id],
@@ -72,7 +100,12 @@ function App() {
     }
   }
 
-  async function handleGoogleDevLogin() {
+  async function handleGoogleLogin() {
+    if (providers?.google) {
+      // Real OAuth: leave the app entirely; we come back with the cookie set.
+      window.location.href = googleLoginUrl();
+      return;
+    }
     const loginEmail = email || "google-player@example.com";
     try {
       const response = await googleDevLogin(loginEmail);
@@ -93,6 +126,12 @@ function App() {
     setRoute("dashboard");
   }
 
+  if (!sessionChecked) {
+    // Blank flash instead of a misleading login screen while we ask the
+    // server whether the cookie is still a valid session.
+    return null;
+  }
+
   if (!authUser) {
     return (
       <AuthScreen
@@ -100,9 +139,11 @@ function App() {
         code={code}
         devCode={devCode}
         email={email}
+        emailEnabled={providers === null || providers.email_code}
+        googleEnabled={providers === null || providers.google || providers.dev_login}
         onCodeChange={setCode}
         onEmailChange={setEmail}
-        onGoogleLogin={handleGoogleDevLogin}
+        onGoogleLogin={handleGoogleLogin}
         onRequestCode={handleRequestCode}
         onVerifyCode={handleVerifyCode}
       />

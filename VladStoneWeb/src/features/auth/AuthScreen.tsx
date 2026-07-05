@@ -7,6 +7,8 @@ export function AuthScreen({
   code,
   devCode,
   email,
+  emailEnabled,
+  googleEnabled,
   onCodeChange,
   onEmailChange,
   onGoogleLogin,
@@ -17,6 +19,8 @@ export function AuthScreen({
   code: string;
   devCode: string | null;
   email: string;
+  emailEnabled: boolean;
+  googleEnabled: boolean;
   onCodeChange: (code: string) => void;
   onEmailChange: (email: string) => void;
   onGoogleLogin: () => void;
@@ -28,17 +32,19 @@ export function AuthScreen({
       <section className="auth-panel">
         <p className="brand">{t.appName}</p>
         <h1>{t.loginTitle}</h1>
-        <div className="login-row">
-          <input
-            aria-label="Email"
-            value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
-            placeholder={t.emailPlaceholder}
-            type="email"
-          />
-          <button onClick={onRequestCode}>{t.sendCode}</button>
-        </div>
-        {devCode && (
+        {emailEnabled && (
+          <div className="login-row">
+            <input
+              aria-label="Email"
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder={t.emailPlaceholder}
+              type="email"
+            />
+            <button onClick={onRequestCode}>{t.sendCode}</button>
+          </div>
+        )}
+        {emailEnabled && devCode && (
           <div className="code-row">
             <input
               aria-label="Код"
@@ -50,9 +56,11 @@ export function AuthScreen({
           </div>
         )}
         {authMessage && <p className="muted">{authMessage}</p>}
-        <button className="secondary" onClick={onGoogleLogin}>
-          {t.googleLogin}
-        </button>
+        {googleEnabled && (
+          <button className="secondary" onClick={onGoogleLogin}>
+            {t.googleLogin}
+          </button>
+        )}
       </section>
     </main>
   );

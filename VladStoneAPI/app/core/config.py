@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     google_oauth_client_id: str | None = None
     google_oauth_client_secret: str | None = None
+    google_oauth_redirect_uri: str = "http://127.0.0.1:8001/api/auth/google/callback"
+    frontend_url: str = "http://127.0.0.1:5173"
+    cookie_secure: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

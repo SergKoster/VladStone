@@ -8,23 +8,29 @@
 2. OAuth consent screen.
 3. OAuth Client ID типа Web application.
 
-## Redirect URI для локальной разработки
+## Redirect URI
 
-Пока backend Google-flow не подключен к реальному OAuth callback, держим dev endpoint:
+Реальный flow реализован (июль 2026): `GET /api/auth/google/login` →
+Google → `GET /api/auth/google/callback` → refresh-cookie → редирект на фронт.
+Dev endpoint `POST /api/auth/google/dev-login` остаётся для локальной
+разработки (работает только при `ENVIRONMENT=local`).
 
-- `POST /api/auth/google/dev-login`
+В Google Cloud Console в Authorized redirect URIs добавить:
 
-Когда будем подключать настоящий callback, локальный redirect URI будет примерно таким:
-
-- `http://localhost:8001/api/auth/google/callback`
+- локально: `http://127.0.0.1:8001/api/auth/google/callback`
+- прод: `https://<домен>/api/auth/google/callback`
 
 ## Env-переменные
 
-Добавить в `VladStoneAPI/.env`:
+Добавить в `VladStoneAPI/.env` (пока кредов нет, кнопка Google на фронте
+работает как dev-login; фронт узнаёт о включённом Google из
+`GET /api/auth/providers`):
 
 ```env
 GOOGLE_OAUTH_CLIENT_ID=...
 GOOGLE_OAUTH_CLIENT_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:8001/api/auth/google/callback
+FRONTEND_URL=http://127.0.0.1:5173
 ```
 
 ## Важное

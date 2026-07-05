@@ -10,6 +10,7 @@
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Архитектура: модули, потоки данных, инварианты, realtime | Перед изменением структуры кода, API, моделей данных |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | План по фазам с зависимостями | При выборе следующей задачи, оценке скоупа |
 | [docs/DESIGN_QUESTIONS.md](docs/DESIGN_QUESTIONS.md) | Архив дизайн-решений владельца (ответы на опросники) | При сомнении в трактовке пункта DESIGN.md |
+| [docs/UX_DETAILS.md](docs/UX_DETAILS.md) | Копилка UX-идей и «приколюх» (микро-взаимодействия, анимации) | Перед работой над UI-полировкой |
 | [TODO.md](TODO.md) | Живой краткосрочный бэклог и найденные баги | Всегда актуален для мелких задач |
 
 **Правило поддержки:** при изменении игровых правил — обнови DESIGN.md; при изменении структуры кода/API/моделей — обнови ARCHITECTURE.md. Не дублируй числа из кода в доки (стоимости карт, тайминги) — ссылайся на файл-источник.
@@ -29,7 +30,7 @@
 
 - `VladStoneAPI/` — FastAPI backend. Домен боя: `app/domain/combat/` (resolver, planning, attacks, movement, collisions, deck, bot, cards...). Роуты: `app/api/routes/`. Realtime: `app/realtime/match_channels.py`.
 - `VladStoneWeb/` — React/Vite/TS frontend. Фичи: `src/features/{battle,collection,dashboard,profile,auth}/`. Общее: `src/shared/` (Card, cardArt, icons, apiClient).
-- `res/Cards/` — исходники артов; рабочие копии кладутся в `VladStoneWeb/src/assets/cards/<card_id>.png` (подхватываются автоматически).
+- `res/Cards/` — исходники артов. Рабочая копия: положить `<card_id>.png/jpg` в `VladStoneWeb/src/assets/cards/` и прогнать `VladStoneAPI\.venv\Scripts\python tools\compress_card_art.py` — получится сжатый `<card_id>.webp` (фронт подхватывает автоматически).
 - `docs/` — документация проекта.
 
 ## Команды

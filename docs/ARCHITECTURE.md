@@ -77,7 +77,14 @@ before_hp/after_hp, sequence, micro_step, snapshot{players,units}`.
   `GET /combat/{id}`, `GET /combat/active`, `POST /combat/resolve`
   (валидация: turn актуален, карты в руке; просроченный ход → 409 и серверный
   дорезолв), demo.
-- `routes/auth.py`: email-код (dev), Google dev-login, refresh-cookie, logout.
+- `routes/auth.py`: email-код (dev), **реальный Google OAuth** — `GET
+  /google/login` (редирект на Google, state-кука против CSRF) и `GET
+  /google/callback` (обмен кода через `services/google_oauth.py`, identity по
+  `sub`, refresh-cookie, редирект на фронт; любая ошибка → `?auth_error=google`);
+  `GET /providers` — какие способы входа включены (фронт строит кнопки по нему);
+  Google dev-login (только `environment=local`), refresh-cookie, logout.
+  Секреты/URL — env через `core/config.py` (`google_oauth_*`, `frontend_url`,
+  `cookie_secure`).
 - `routes/me.py`: профиль, коллекция (+ ascend — подлежит отключению, см. §7).
 - `services/combat_turn_timers.py`: дорезолв матчей с истёкшим дедлайном.
   Вызывается и лениво из роутов, и фоновым воркером
@@ -106,6 +113,18 @@ WS `/ws/matches/{id}`: снапшот при подключении, `match.upda
 резолва (руками роутов), ping/pong. Клиент имеет polling-fallback (8 с), когда
 WS не подключён. Одного инстанса достаточно для цели 100–200 CCU; Redis pub/sub —
 только при переходе на несколько инстансов (Р2+).
+
+### 2.5 Деплой (prod)
+
+Один VPS, один домен, `deploy/docker-compose.prod.yml` (инструкция —
+[DEPLOY.md](DEPLOY.md)): Caddy (образ web, multi-stage `VladStoneWeb/Dockerfile`
+c `target: prod`) раздаёт статику фронта и проксирует `/api` + `/ws` в
+uvicorn; PostgreSQL — только во внутренней сети. Same-origin убирает
+CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/api`). HTTPS — авто
+(Caddy). Миграции — на старте контейнера API (`alembic upgrade head`);
+`init_db`/create_all вне local/test отключён. **Один uvicorn-воркер** — WS и
+таймер in-process (§2.4). Прод-режим включается `ENVIRONMENT=production`:
+гасит dev-login, email-коды и create_all; `COOKIE_SECURE=true`.
 
 ## 3. Frontend
 
@@ -259,8 +278,9 @@ Data-driven, чтобы новые карты не требовали кода �
 3. **JSON-блоб матча**: удобен сейчас; при аналитике/истории матчей потребуются
    проекции (отдельные таблицы результатов).
 4. **Один инстанс**: in-process WS-менеджер — осознанное ограничение до Р2.
-5. **Ассеты карт**: PNG из `res/Cards` весят до 1.8 МБ; пайплайн сжатия артов
-   понадобится до Р1 (20–30 карт × вес).
+5. ~~Ассеты карт~~ **Закрыто** (июль 2026): пайплайн `tools/compress_card_art.py`
+   сжимает рабочие копии в .webp ≤640px (текущие арты: 4.5 МБ → 278 КБ);
+   оригиналы остаются в `res/Cards`.
 6. **Резолв матча без блокировок** (проверено по коду, июль 2026): один матч
    могут дорезолвить одновременно роут `/combat/resolve`, ленивый дорезолв
    (GET/WS) и фоновый воркер — записи `state_json` не сериализованы (нет
