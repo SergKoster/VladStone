@@ -3,18 +3,19 @@
 Использование (из корня репо):
     VladStoneAPI\\.venv\\Scripts\\python tools\\compress_card_art.py
 
-Что делает: каждый png/jpg/jpeg в assets/cards уменьшается до MAX_SIDE px по
-большей стороне и сохраняется как <card_id>.webp (с прозрачностью, если была);
-исходная рабочая копия удаляется. Оригиналы в res/Cards не трогаются.
-Фронт подхватывает .webp автоматически (glob в cardArt.tsx). Запуск повторно
-безопасен: готовые .webp пропускаются, если рядом нет свежего png/jpg.
+Что делает: каждый png/jpg/jpeg в assets/cards кадрируется по центру в квадрат
+1:1 (арт карты квадратный по дизайну), уменьшается до MAX_SIDE px и
+сохраняется как <card_id>.webp (с прозрачностью, если была); исходная рабочая
+копия удаляется. Оригиналы в res/Cards не трогаются. Фронт подхватывает .webp
+автоматически (glob в cardArt.tsx). Запуск повторно безопасен: готовые .webp
+пропускаются, если рядом нет свежего png/jpg.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 CARDS_DIR = Path(__file__).resolve().parents[1] / "VladStoneWeb" / "src" / "assets" / "cards"
 MAX_SIDE = 640
@@ -26,7 +27,9 @@ def compress_one(source: Path) -> tuple[int, int]:
     image.load()
     if image.mode not in ("RGB", "RGBA"):
         image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
-    image.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    # Square 1:1 via center-crop; never upscale small art (side capped by source).
+    side = min(MAX_SIDE, min(image.size))
+    image = ImageOps.fit(image, (side, side), Image.LANCZOS)
 
     target = source.with_suffix(".webp")
     image.save(target, format="WEBP", quality=WEBP_QUALITY, method=6)

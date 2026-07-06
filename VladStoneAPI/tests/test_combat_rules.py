@@ -1,9 +1,16 @@
 from datetime import UTC, datetime, timedelta
 
 from app.domain.combat.cards import DECK_CARD_IDS
-from app.domain.combat.models import CombatEventType, PlayerSide, Position
+from app.domain.combat.models import (
+    ActionPriority,
+    CardDefinition,
+    CombatEventType,
+    PlayerSide,
+    Position,
+    Rarity,
+    UnitStats,
+)
 from app.domain.combat.rules import (
-    BRUISER_CARD,
     RANGER_CARD,
     add_turn_mana,
     apply_placements,
@@ -16,6 +23,61 @@ from app.domain.combat.rules import (
     reward_for_result,
 )
 from app.domain.combat.timing import is_planning_deadline_expired
+
+# Rule scenarios must not depend on the content catalog (its stats are
+# placeholder "1s" while the combat rework is being designed). These legacy
+# cards carry the exact stats the scenarios below are written against.
+LEGACY_RANGER = CardDefinition(
+    id="legacy_ranger",
+    name="Легаси-дальник",
+    cost=2,
+    rarity=Rarity.COMMON,
+    stats=UnitStats(
+        hp=2,
+        damage=1,
+        attack_range=2,
+        move_steps=1,
+        attacks=2,
+        action_priority=ActionPriority.ATTACK_FIRST,
+    ),
+)
+LEGACY_BRUISER = CardDefinition(
+    id="legacy_bruiser",
+    name="Легаси-толстяк",
+    cost=3,
+    rarity=Rarity.COMMON,
+    stats=UnitStats(
+        hp=4,
+        damage=2,
+        attack_range=1,
+        move_steps=1,
+        attacks=1,
+        action_priority=ActionPriority.ATTACK_FIRST,
+    ),
+)
+
+
+def legacy_demo_match():
+    """Demo layout (ranger vs bruiser) built from the legacy test cards."""
+    match = create_demo_match()
+    top_player, bottom_player = match.players
+    match.units = [
+        create_unit(
+            unit_id="top_ranger",
+            owner_id=top_player.id,
+            side=top_player.side,
+            card=LEGACY_RANGER,
+            position=Position(row=1, col=1),
+        ),
+        create_unit(
+            unit_id="bottom_bruiser",
+            owner_id=bottom_player.id,
+            side=bottom_player.side,
+            card=LEGACY_BRUISER,
+            position=Position(row=3, col=1),
+        ),
+    ]
+    return match
 
 
 def test_deck_cycle_deals_hand_draws_and_reshuffles() -> None:
@@ -45,13 +107,14 @@ def test_placements_from_hand_consume_only_played_cards() -> None:
     match = create_player_match()
     match.player_hand = ["banka", "zadanie", "test_ranger"]
     player = next(candidate for candidate in match.players if candidate.id == "player")
-    player.mana = 2
+    # Exactly enough mana for one card: the second placement must be skipped.
+    player.mana = 1
 
     updated = apply_placements(
         match,
         [
             ("banka", Position(row=4, col=0)),
-            # Too expensive for 2 mana: skipped, must stay in hand.
+            # No mana left for it: skipped, must stay in hand.
             ("zadanie", Position(row=4, col=1)),
             # Not in hand: skipped.
             ("test_bruiser", Position(row=4, col=2)),
@@ -70,7 +133,8 @@ def test_bot_alternates_bruiser_lane_0_and_ranger_lane_1() -> None:
     bot = next(candidate for candidate in match.players if candidate.id == "bot")
 
     # Not enough mana for the bruiser yet: the bot saves up instead of skipping
-    # ahead in its pattern.
+    # ahead in its pattern. (Forced to 0 so the check holds for any card cost.)
+    bot.mana = 0
     skipped = apply_simple_bot_turn(match)
     assert not [unit for unit in skipped.units if unit.owner_id == "bot"]
     assert skipped.bot_spawn_count == 0
@@ -116,7 +180,7 @@ def test_spawn_zone_is_nearest_row_to_hero() -> None:
 
 
 def test_attack_first_unit_attacks_before_moving() -> None:
-    match = create_demo_match()
+    match = legacy_demo_match()
     match.units[0].position = Position(row=1, col=1)
     match.units[1].position = Position(row=2, col=1)
 
@@ -137,14 +201,14 @@ def test_collision_consumes_actions_and_continues_resolve() -> None:
             unit_id="top_bruiser",
             owner_id=top_player.id,
             side=top_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=1, col=0),
         ),
         create_unit(
             unit_id="bottom_bruiser",
             owner_id=bottom_player.id,
             side=bottom_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=3, col=0),
         ),
     ]
@@ -173,14 +237,14 @@ def test_same_micro_turn_move_conflict_consumes_steps_for_both_units() -> None:
             unit_id="top_walker",
             owner_id=top_player.id,
             side=top_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=1, col=1),
         ),
         create_unit(
             unit_id="bottom_walker",
             owner_id=bottom_player.id,
             side=bottom_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=3, col=1),
         ),
     ]
@@ -205,14 +269,14 @@ def test_second_same_cell_collision_without_attacks_only_consumes_steps() -> Non
             unit_id="top_bruiser",
             owner_id=top_player.id,
             side=top_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=1, col=0),
         ),
         create_unit(
             unit_id="bottom_bruiser",
             owner_id=bottom_player.id,
             side=bottom_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=3, col=0),
         ),
     ]
@@ -235,12 +299,13 @@ def test_player_can_spawn_on_enemy_in_spawn_row_and_push_it_back() -> None:
     match = create_player_match()
     player = next(candidate for candidate in match.players if candidate.id == "player")
     bot = next(candidate for candidate in match.players if candidate.id == "bot")
-    player.mana = 3
+    # Exactly the card's cost, so the spawn drains the mana to zero below.
+    player.mana = 1
     enemy = create_unit(
         unit_id="enemy_at_spawn",
         owner_id=bot.id,
         side=bot.side,
-        card=RANGER_CARD,
+        card=LEGACY_RANGER,
         position=Position(row=4, col=1),
     )
     match.units = [enemy]
@@ -312,7 +377,7 @@ def test_overkill_attack_is_not_wasted_on_a_doomed_target() -> None:
 
 
 def test_ranger_does_not_move_when_attack_is_available() -> None:
-    match = create_demo_match()
+    match = legacy_demo_match()
     match.units[0].position = Position(row=1, col=1)
     match.units[1].position = Position(row=3, col=1)
 
@@ -323,7 +388,7 @@ def test_ranger_does_not_move_when_attack_is_available() -> None:
 
 
 def test_combat_events_include_replay_fields_for_animation() -> None:
-    match = create_demo_match()
+    match = legacy_demo_match()
     match.units[0].position = Position(row=1, col=1)
     match.units[1].position = Position(row=3, col=1)
 
@@ -359,14 +424,14 @@ def test_collision_event_contains_replay_fields() -> None:
             unit_id="top_bruiser",
             owner_id=top_player.id,
             side=top_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=1, col=0),
         ),
         create_unit(
             unit_id="bottom_bruiser",
             owner_id=bottom_player.id,
             side=bottom_player.side,
-            card=BRUISER_CARD,
+            card=LEGACY_BRUISER,
             position=Position(row=3, col=0),
         ),
     ]

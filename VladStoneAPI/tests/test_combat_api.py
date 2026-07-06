@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.db.models import AuditLog, CombatMatchRecord
 from app.db.session import SessionLocal
+from app.domain.combat.cards import DECK_CARD_IDS
 from app.domain.combat.models import MatchLifecycleStatus, Position
 from app.domain.combat.rules import RANGER_CARD, create_player_match, create_unit
 from app.main import create_app
@@ -38,7 +39,7 @@ def test_start_and_resolve_combat_turn() -> None:
     assert match["status"] == "planning"
     # Deck cycle: hand of 3 dealt from the shuffled deck, order kept secret.
     assert len(match["player_hand"]) == 3
-    assert match["deck_count"] == 4
+    assert match["deck_count"] == len(DECK_CARD_IDS) - 3
     assert "player_deck" not in match
 
     get_response = client.get(f"/api/combat/{match['id']}")
@@ -86,7 +87,7 @@ def test_start_and_resolve_combat_turn() -> None:
     # End of turn draws one card back into the hand.
     expected_hand = 3 - len(placements) + 1
     assert len(resolved["player_hand"]) == expected_hand
-    assert resolved["deck_count"] == 3
+    assert resolved["deck_count"] == len(DECK_CARD_IDS) - 4
 
     stale_response = client.post(
         "/api/combat/resolve",

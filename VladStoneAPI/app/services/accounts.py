@@ -24,23 +24,22 @@ def normalize_email(email: str) -> str:
 
 
 def ensure_seed_cards(db: Session) -> None:
+    # The domain catalog (cards.py) is the single source of card stats; the DB
+    # rows are a projection for joins — sync them on every seed pass so stat
+    # changes in the catalog reach existing databases too.
     for card in STARTER_CARDS:
         existing = db.get(CardDefinition, card.id)
-        if existing is not None:
-            continue
-        db.add(
-            CardDefinition(
-                id=card.id,
-                name=card.name,
-                cost=card.cost,
-                hp=card.stats.hp,
-                damage=card.stats.damage,
-                attack_range=card.stats.attack_range,
-                move_steps=card.stats.move_steps,
-                attacks=card.stats.attacks,
-                action_priority=card.stats.action_priority.value,
-            )
-        )
+        if existing is None:
+            existing = CardDefinition(id=card.id)
+            db.add(existing)
+        existing.name = card.name
+        existing.cost = card.cost
+        existing.hp = card.stats.hp
+        existing.damage = card.stats.damage
+        existing.attack_range = card.stats.attack_range
+        existing.move_steps = card.stats.move_steps
+        existing.attacks = card.stats.attacks
+        existing.action_priority = card.stats.action_priority.value
 
 
 def get_or_create_user_for_identity(
