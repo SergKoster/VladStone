@@ -66,7 +66,7 @@ def add_event(
             before_hp=before_hp,
             after_hp=after_hp,
             sequence=sequence,
-            micro_step=sequence,
+            micro_step=match.current_iteration,
             snapshot=event_snapshot(match),
         )
     )

@@ -20,6 +20,9 @@ def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchStat
         return resolved
     resolved.status = MatchLifecycleStatus.RESOLVING
     clear_planning_timer(resolved)
+    # Setup spawns (already emitted this turn) are iteration 0; micro-turns below
+    # are 1, 2, 3... so the client can pause between iterations. See micro_step.
+    resolved.current_iteration = 0
     for unit in resolved.units:
         unit.remaining_steps = unit.stats.move_steps
         unit.remaining_attacks = unit.stats.attacks
@@ -27,6 +30,7 @@ def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchStat
     for _ in range(BOARD_ROWS * 4):
         if resolved.result.status == "finished":
             break
+        resolved.current_iteration += 1
         acted = resolve_micro_turn(resolved)
         remove_dead_units(resolved)
         finish_match_if_needed(resolved)

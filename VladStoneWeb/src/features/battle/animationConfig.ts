@@ -33,8 +33,12 @@ const STRIKE_BASE = 640;
 // Fraction of the strike at which the attacker is on the target (impact moment).
 export const STRIKE_IMPACT = 0.42;
 
-// Extra pause inserted after each animated micro-step so turns are easy to follow.
-const INTER_STEP_PAUSE = 280;
+// Two pauses between events, chosen by whether the next event is the same
+// resolver iteration or the next one (COMBAT_REWORK §18.3). Events of one
+// iteration happen "at once", so they play tight; a much longer pause between
+// iterations makes each micro-turn read as a distinct beat. Tunable (O10).
+const INTRA_ITERATION_PAUSE = 90;
+const INTER_ITERATION_PAUSE = 620;
 
 // Hard cap on "no animation progress": if no event advances for this long, the
 // battle watchdog force-finishes the turn. Generously above the longest single
@@ -71,9 +75,14 @@ export function strikeFor(speed: AnimationSpeed): number {
   return scale(STRIKE_BASE, speed);
 }
 
-/** Pause inserted between animated micro-steps. */
-export function pauseFor(speed: AnimationSpeed): number {
-  return scale(INTER_STEP_PAUSE, speed);
+/** Short pause between two events of the same resolver iteration. */
+export function intraIterationPauseFor(speed: AnimationSpeed): number {
+  return scale(INTRA_ITERATION_PAUSE, speed);
+}
+
+/** Long pause between events that cross into the next resolver iteration. */
+export function interIterationPauseFor(speed: AnimationSpeed): number {
+  return scale(INTER_ITERATION_PAUSE, speed);
 }
 
 /** CSS timing lengths handed to the unit layer for the glide and the strike. */

@@ -129,6 +129,11 @@ class MatchState(BaseModel):
     ruleset_version: int = 1
     status: MatchLifecycleStatus = MatchLifecycleStatus.PLANNING
     turn: int = Field(default=1, ge=1)
+    # Resolver iteration (micro-turn) counter, stamped onto each event's
+    # `micro_step`. Reset to 0 at the start of every turn: setup spawns are
+    # iteration 0, the first micro-turn is 1, the next is 2, and so on. Lets the
+    # client tell "same iteration" (tight pause) from "next iteration" (long pause).
+    current_iteration: int = Field(default=0, ge=0)
     rows: int = 5
     cols: int = 3
     mana_cap: int = 10

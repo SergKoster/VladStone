@@ -25,6 +25,7 @@ app/domain/combat/bot.py
 app/domain/combat/cards.py
 app/domain/combat/collisions.py
 app/domain/combat/constants.py
+app/domain/combat/deck.py
 app/domain/combat/events.py
 app/domain/combat/factory.py
 app/domain/combat/helpers.py
@@ -46,12 +47,15 @@ app/services/combat_payloads.py
 app/services/combat_timer_worker.py
 app/services/combat_turn_timers.py
 app/services/dev_logging.py
+app/services/google_oauth.py
 app/services/rate_limit.py
 app/services/rewards.py
 app/services/security.py
 tests/test_auth.py
 tests/test_combat_api.py
+tests/test_combat_resolve_race.py
 tests/test_combat_rules.py
+tests/test_google_oauth.py
 tests/test_health.py
 tests/test_telemetry.py
 vladstone_api.egg-info/PKG-INFO

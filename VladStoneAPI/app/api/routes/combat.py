@@ -143,6 +143,8 @@ async def resolve_combat_turn(
 
     match = load_match(record)
     match.events = []
+    # Fresh event stream for this turn: setup spawns below are iteration 0.
+    match.current_iteration = 0
     append_dev_log(
         "combat-server.jsonl",
         "combat_resolve_request",

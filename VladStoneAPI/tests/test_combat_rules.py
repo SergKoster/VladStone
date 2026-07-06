@@ -408,11 +408,21 @@ def test_combat_events_include_replay_fields_for_animation() -> None:
     assert move_event.from_position is not None
     assert move_event.to_position is not None
 
+    # micro_step is the resolver iteration index: it groups the events of one
+    # simultaneous micro-turn and only ever increases. This scenario has no setup
+    # spawns (units are pre-placed), so the first iteration is 1.
     micro_steps = [event.micro_step for event in resolved.events]
     assert micro_steps == sorted(micro_steps)
     assert micro_steps[0] == 1
+    # sequence stays a distinct, strictly increasing per-event counter (unlike
+    # micro_step, which repeats within an iteration).
     sequences = [event.sequence for event in resolved.events]
-    assert sequences == micro_steps
+    assert sequences == sorted(sequences)
+    assert len(set(sequences)) == len(sequences)
+    # Several events share iteration 1 (attack + move happen together), so the
+    # grouping is coarser than the raw sequence — this is what drives the client's
+    # tight-within / long-between iteration pauses.
+    assert len(set(micro_steps)) < len(sequences)
 
 
 def test_collision_event_contains_replay_fields() -> None:

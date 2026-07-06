@@ -22,8 +22,9 @@ import {
   ANIMATION_WATCHDOG_MS,
   STRIKE_IMPACT,
   durationFor,
+  interIterationPauseFor,
+  intraIterationPauseFor,
   layerTimings,
-  pauseFor,
   prefersReducedMotion,
   strikeFor,
 } from "./animationConfig";
@@ -64,6 +65,10 @@ export function Battle({
 }) {
   const cells = Array.from({ length: 15 }, (_, index) => index);
   const [match, setMatch] = React.useState<CombatMatch | null>(null);
+  // Always-current mirror of `match`: the realtime callback is a closure that
+  // captures a stale `match`, so it reads the live turn through this ref instead.
+  const matchRef = React.useRef<CombatMatch | null>(null);
+  matchRef.current = match;
   const {
     battleMessage,
     isResolving,
@@ -268,6 +273,10 @@ export function Battle({
   // The state the current animation is playing towards; the watchdog lands on
   // it when the animation pipeline hangs instead of finishing.
   const latestFinalMatchRef = React.useRef<CombatMatch | null>(null);
+  // True while a turn is being animated. A synchronous guard (a ref, not state)
+  // so overlapping calls are rejected in the same tick — state/effect lag would
+  // let a second run slip through and fight the first over the board.
+  const isPlayingRef = React.useRef(false);
 
   // Watchdog: a hung animation would freeze the battle in "Идёт ход" forever —
   // the turn timer stops and realtime updates get dropped as "busy", so there
@@ -292,6 +301,9 @@ export function Battle({
       setActiveEvent(null);
       resetEffects();
       setIsAnimating(false);
+      // Release the re-entrancy guard too, or every later turn would be rejected
+      // as "already playing" and animations would soft-lock for the rest of the match.
+      isPlayingRef.current = false;
       setBattleMessage("Анимация зависла — показан итог хода.");
     }, ANIMATION_WATCHDOG_MS);
     return () => window.clearTimeout(watchdogId);
@@ -359,6 +371,25 @@ export function Battle({
 
   async function applyRealtimeMatchUpdate(payload: { match: CombatMatch; events: CombatEvent[] }) {
     const resolvedMatch = withCombatEvents(payload.match, payload.events);
+    // The resolve route also broadcasts the turn it just resolved. The client that
+    // initiated the resolve already animated it from the HTTP response, so a
+    // broadcast for a state we already show would replay the whole turn (collisions
+    // included) a second time. Skip the echo of our own resolve — keyed on
+    // (turn, result.status), because a finishing turn does not bump the turn number,
+    // so an away client must still be able to animate the finish.
+    const shown = matchRef.current;
+    const shownTurn = shown?.turn ?? 0;
+    const shownStatus = shown?.result.status ?? "active";
+    const isEcho =
+      resolvedMatch.turn < shownTurn ||
+      (resolvedMatch.turn === shownTurn && resolvedMatch.result.status === shownStatus);
+    if (isEcho) {
+      logClientEvent(
+        "battle_realtime_duplicate",
+        battleSnapshot(resolvedMatch, [], { shownTurn, shownStatus }),
+      );
+      return;
+    }
     logClientEvent("battle_realtime_update", battleSnapshot(resolvedMatch, placements));
     await playCombatEvents(resolvedMatch);
     setPlacements([]);
@@ -470,8 +501,21 @@ export function Battle({
       return;
     }
 
-    const speed = ANIMATION_SPEED;
+    // Re-entrancy guard: the resolve button and realtime pushes can each try to
+    // play a turn, and the busy ref that gates realtime lags React state by one
+    // effect tick — so two runs can overlap, fight over the board, and leave
+    // isAnimating stuck true. A call arriving mid-animation only records the
+    // newest final state (the running finally lands on it) and returns.
     latestFinalMatchRef.current = finalMatch;
+    if (isPlayingRef.current) {
+      return;
+    }
+    isPlayingRef.current = true;
+    // Mark busy synchronously (not via the effect) so a realtime push arriving
+    // before the effect commits cannot enter and start a second, overlapping run.
+    isRealtimeBusyRef.current = true;
+
+    const speed = ANIMATION_SPEED;
     setIsAnimating(true);
 
     try {
@@ -481,7 +525,19 @@ export function Battle({
         return;
       }
 
-      const pause = pauseFor(speed);
+      const intraPause = intraIterationPauseFor(speed);
+      const interPause = interIterationPauseFor(speed);
+      // Pause after the event(s) just played: short within one resolver iteration,
+      // long when the next event crosses into the next iteration (micro_step
+      // changes) so each micro-turn reads as its own beat (COMBAT_REWORK §18.3).
+      // `index` already points at the next unplayed event when this is called.
+      const pauseAfter = (playedStep: number | null): number => {
+        const next = events[index];
+        if (!next) {
+          return 0;
+        }
+        return next.micro_step === playedStep ? intraPause : interPause;
+      };
       let index = 0;
       while (index < events.length) {
         const event = events[index];
@@ -502,36 +558,34 @@ export function Battle({
             group.push(events[index]);
             index += 1;
           }
-          await playLunge(
-            group.filter((entry) => entry.actor_id),
-            group[group.length - 1],
-            finalMatch,
-          );
-          await wait(pause);
-          continue;
+          // Forward-progress guard: if nothing clustered (e.g. a collision event
+          // with no to_position), `index` would never advance and this loop would
+          // spin forever, never releasing isAnimating. Fall through to the generic
+          // handlers below, which always consume exactly one event.
+          if (group.length > 0) {
+            await playLunge(
+              group.filter((entry) => entry.actor_id),
+              group[group.length - 1],
+              finalMatch,
+            );
+            await wait(pauseAfter(event.micro_step));
+            continue;
+          }
         }
 
         // Melee/ranged strike: keep the board as-is until the attacker lands, then
         // playLunge applies the hit (HP) in sync with the animation.
         if (isMeleeLunge(event)) {
           await playLunge([event], event, finalMatch);
-          await wait(pause);
           index += 1;
+          await wait(pauseAfter(event.micro_step));
           continue;
         }
 
         applyEventToBoard(event, finalMatch);
-
-        if (event.type === "death") {
-          await wait(durationFor("death", speed));
-          await wait(pause);
-          index += 1;
-          continue;
-        }
-
         await wait(durationFor(event.type, speed));
-        await wait(pause);
         index += 1;
+        await wait(pauseAfter(event.micro_step));
       }
     } catch (error) {
       logClientEvent(
@@ -541,11 +595,13 @@ export function Battle({
     } finally {
       // Whatever happened above — finished, threw, or was cut short — the
       // battle must never stay locked in "Идёт ход": land on the authoritative
-      // final state and unlock the UI (timer, hand, resolve button).
-      setMatch(finalMatch);
+      // final state (the newest one if a push arrived mid-animation) and unlock
+      // the UI (timer, hand, resolve button).
+      setMatch(latestFinalMatchRef.current ?? finalMatch);
       setActiveEvent(null);
       resetEffects();
       setIsAnimating(false);
+      isPlayingRef.current = false;
     }
     if (finalMatch.result.status === "finished") {
       onBattleFinished();

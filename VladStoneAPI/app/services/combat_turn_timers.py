@@ -24,6 +24,8 @@ def resolve_expired_planning_match(
         return None
 
     match.events = []
+    # Fresh event stream for this turn: setup spawns below are iteration 0.
+    match.current_iteration = 0
     match = apply_simple_bot_turn(match)
     resolved = resolve_turn(match, now=checked_at)
     save_match(record, resolved)
