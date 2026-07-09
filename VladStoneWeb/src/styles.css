@@ -635,6 +635,46 @@ nav {
   }
 }
 
+/* Resolve-phase indicator ("итерация N"): a light-blue pill in the banner slot
+   above the board during resolution — sits over no cell, so it never hides a
+   unit. Shows the phase / iteration and pops on each change (COMBAT_REWORK §18.3). */
+.iteration-overlay {
+  justify-self: center;
+  padding: 0.4em 1.1em;
+  border-radius: 999px;
+  background: rgb(64 156 230 / 0.94);
+  color: #f4f9ff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-align: center;
+  box-shadow: 0 3px 12px rgb(24 60 110 / 0.32);
+}
+
+/* Keyed by iterationStep in the JSX, so it remounts and pops on each change. */
+.iteration-overlay > span {
+  display: inline-block;
+  animation: iteration-pop 240ms ease-out;
+}
+
+@keyframes iteration-pop {
+  0% {
+    opacity: 0.35;
+    transform: translateY(-3px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iteration-overlay > span {
+    animation: none;
+  }
+}
+
 .board-cell {
   position: relative;
   display: grid;

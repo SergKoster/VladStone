@@ -56,6 +56,16 @@ import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime"
 import { useBattleAnimationState } from "./useBattleAnimationState";
 import { useBattleUiState } from "./useBattleUiState";
 
+// Label for the resolve-phase overlay ("итерация N"). micro_step 0 is the setup
+// spawns of the turn; 1..N are the unit micro-turns. v4 will add spell/end phases
+// via an event `phase` field (COMBAT_REWORK §18.3) — extend here when it lands.
+function iterationLabel(step: number | null): string {
+  if (step === null || step <= 0) {
+    return "Появление воинов";
+  }
+  return `Итерация ${step}`;
+}
+
 export function Battle({
   cards,
   onBattleFinished,
@@ -88,6 +98,11 @@ export function Battle({
   const { activeEvent, isAnimating, setActiveEvent, setIsAnimating } = useBattleAnimationState();
   const { lunges, setLunges, clearLunges, popups, addPopup, dyingIds, markDying, reset: resetEffects } =
     useBattleEffects();
+  // Resolve-phase overlay ("итерация N"): step = micro_step being played, visible
+  // toggles the fade. Purely derived from the event stream — no server data
+  // beyond micro_step (COMBAT_REWORK §18.3).
+  const [iterationStep, setIterationStep] = React.useState<number | null>(null);
+  const [iterationVisible, setIterationVisible] = React.useState(false);
   const [realtimeStatus, setRealtimeStatus] =
     React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const isRealtimeBusyRef = React.useRef(false);
@@ -320,6 +335,15 @@ export function Battle({
     // watchdog only fires when the pipeline makes no progress at all.
   }, [activeEvent, isAnimating]);
 
+  // Fade the iteration overlay out the moment playback settles — whether the loop
+  // finished, the watchdog force-finished, or reduced motion skipped it, all land
+  // on isAnimating=false. Keep iterationStep so the last label fades, not blanks.
+  React.useEffect(() => {
+    if (!isAnimating) {
+      setIterationVisible(false);
+    }
+  }, [isAnimating]);
+
   React.useEffect(() => {
     if (!isTimerRunning || !match || isFinished) {
       return;
@@ -546,16 +570,27 @@ export function Battle({
 
       const intraPause = intraIterationPauseFor(speed);
       const interPause = interIterationPauseFor(speed);
+      // Show the resolve overlay on the first iteration; settleAfter() flips it to
+      // the next iteration inside the inter-iteration gap below.
+      setIterationStep(events[0].micro_step ?? 0);
+      setIterationVisible(true);
       // Pause after the event(s) just played: short within one resolver iteration,
       // long when the next event crosses into the next iteration (micro_step
       // changes) so each micro-turn reads as its own beat (COMBAT_REWORK §18.3).
-      // `index` already points at the next unplayed event when this is called.
-      const pauseAfter = (playedStep: number | null): number => {
+      // Crossing a boundary also flips the overlay to the new iteration during that
+      // longer gap — one gap, not a stack of pauses. `index` already points at the
+      // next unplayed event when this is called.
+      const settleAfter = async (playedStep: number | null): Promise<void> => {
         const next = events[index];
         if (!next) {
-          return 0;
+          return;
         }
-        return next.micro_step === playedStep ? intraPause : interPause;
+        if (next.micro_step === playedStep) {
+          await wait(intraPause);
+          return;
+        }
+        setIterationStep(next.micro_step ?? playedStep);
+        await wait(interPause);
       };
       let index = 0;
       while (index < events.length) {
@@ -592,7 +627,7 @@ export function Battle({
               finalMatch,
               cancelled,
             );
-            await wait(pauseAfter(event.micro_step));
+            await settleAfter(event.micro_step);
             continue;
           }
         }
@@ -602,14 +637,14 @@ export function Battle({
         if (isMeleeLunge(event)) {
           await playLunge([event], event, finalMatch, cancelled);
           index += 1;
-          await wait(pauseAfter(event.micro_step));
+          await settleAfter(event.micro_step);
           continue;
         }
 
         applyEventToBoard(event, finalMatch);
         await wait(durationFor(event.type, speed));
         index += 1;
-        await wait(pauseAfter(event.micro_step));
+        await settleAfter(event.micro_step);
       }
     } catch (error) {
       logClientEvent(
@@ -741,9 +776,21 @@ export function Battle({
         <div className={activeEvent?.target_id === "bot" ? "hero-line enemy hit" : "hero-line enemy"}>
           Герой врага · {bot?.hero.hp ?? 20} HP
         </div>
-        {isResolving || isAnimating ? (
+        {iterationVisible ? (
+          // While events actually play, the banner slot shows the current iteration
+          // / phase ("итерация N") — takes priority over the generic labels below
+          // (isResolving stays true through playback). Sits above the board, so it
+          // never covers a unit; the keyed span pops on each change (§18.3).
+          <div className="iteration-overlay" role="status">
+            <span key={iterationStep ?? "none"}>{iterationLabel(iterationStep)}</span>
+          </div>
+        ) : isResolving ? (
           <div className="resolve-banner" role="status">
-            {isResolving ? "Сервер разыгрывает ход" : "Идёт ход"}
+            Сервер разыгрывает ход
+          </div>
+        ) : isAnimating ? (
+          <div className="resolve-banner" role="status">
+            Идёт ход
           </div>
         ) : null}
         <div className="board-wrap">
