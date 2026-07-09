@@ -4,14 +4,14 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["run", "dev", "--", "--host", "127.0.0.1"],
       "cwd": "VladStoneWeb",
       "port": 5173
     },
     {
       "name": "api",
       "runtimeExecutable": ".\\.venv\\Scripts\\python",
-      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8001"],
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8001"],
       "cwd": "VladStoneAPI",
       "port": 8001
     }

@@ -277,6 +277,12 @@ export function Battle({
   // so overlapping calls are rejected in the same tick — state/effect lag would
   // let a second run slip through and fight the first over the board.
   const isPlayingRef = React.useRef(false);
+  // Generation token for the active playback run. The watchdog (or a superseding
+  // run) bumps it; the running loop checks it after every await and bails without
+  // touching the board — otherwise a loop the watchdog already force-finished
+  // would wake up and replay its tail on top of the final state (looks like the
+  // turn playing twice).
+  const playGenRef = React.useRef(0);
 
   // Watchdog: a hung animation would freeze the battle in "Идёт ход" forever —
   // the turn timer stops and realtime updates get dropped as "busy", so there
@@ -295,6 +301,9 @@ export function Battle({
           stalledEventSequence: activeEvent?.sequence ?? null,
         }),
       );
+      // Invalidate the in-flight loop so it cannot resume and replay its tail on
+      // top of the final state we are about to set.
+      playGenRef.current += 1;
       if (latestFinalMatchRef.current) {
         setMatch(latestFinalMatchRef.current);
       }
@@ -471,6 +480,7 @@ export function Battle({
     lungeEvents: CombatEvent[],
     snapshotEvent: CombatEvent,
     finalMatch: CombatMatch,
+    isCancelled: () => boolean,
   ) {
     const speed = ANIMATION_SPEED;
     const strikeMs = strikeFor(speed);
@@ -482,6 +492,11 @@ export function Battle({
 
     setLunges(offsets);
     await wait(impactMs);
+    // If the run was force-finished mid-strike, stop before mutating the board —
+    // the final state is already on screen; replaying the hit would double it.
+    if (isCancelled()) {
+      return;
+    }
     // Impact: the attacker is on the target — apply the post-hit board state and
     // patch each target's exact HP (snapshots are pre-damage), then pop numbers.
     applyEventToBoard(snapshotEvent, finalMatch);
@@ -511,6 +526,10 @@ export function Battle({
       return;
     }
     isPlayingRef.current = true;
+    // Claim this run's generation; if the watchdog (or a superseding run) bumps it,
+    // `cancelled()` turns true and the loop bails after its next await.
+    const myGen = (playGenRef.current += 1);
+    const cancelled = () => playGenRef.current !== myGen;
     // Mark busy synchronously (not via the effect) so a realtime push arriving
     // before the effect commits cannot enter and start a second, overlapping run.
     isRealtimeBusyRef.current = true;
@@ -540,6 +559,10 @@ export function Battle({
       };
       let index = 0;
       while (index < events.length) {
+        // Bail before any board mutation if this run was force-finished/superseded.
+        if (cancelled()) {
+          return;
+        }
         const event = events[index];
         setActiveEvent(event);
         setBattleMessage(event.message);
@@ -567,6 +590,7 @@ export function Battle({
               group.filter((entry) => entry.actor_id),
               group[group.length - 1],
               finalMatch,
+              cancelled,
             );
             await wait(pauseAfter(event.micro_step));
             continue;
@@ -576,7 +600,7 @@ export function Battle({
         // Melee/ranged strike: keep the board as-is until the attacker lands, then
         // playLunge applies the hit (HP) in sync with the animation.
         if (isMeleeLunge(event)) {
-          await playLunge([event], event, finalMatch);
+          await playLunge([event], event, finalMatch, cancelled);
           index += 1;
           await wait(pauseAfter(event.micro_step));
           continue;
@@ -593,17 +617,22 @@ export function Battle({
         battleSnapshot(finalMatch, [], { error: String(error) }),
       );
     } finally {
-      // Whatever happened above — finished, threw, or was cut short — the
-      // battle must never stay locked in "Идёт ход": land on the authoritative
-      // final state (the newest one if a push arrived mid-animation) and unlock
-      // the UI (timer, hand, resolve button).
-      setMatch(latestFinalMatchRef.current ?? finalMatch);
-      setActiveEvent(null);
-      resetEffects();
-      setIsAnimating(false);
-      isPlayingRef.current = false;
+      // Only the current run settles the UI. If we were superseded (watchdog or a
+      // newer turn), that owner already set the final state and flags — a stale
+      // run touching them here would clobber the newer turn.
+      if (!cancelled()) {
+        // Whatever happened above — finished, threw, or was cut short — the
+        // battle must never stay locked in "Идёт ход": land on the authoritative
+        // final state (the newest one if a push arrived mid-animation) and unlock
+        // the UI (timer, hand, resolve button).
+        setMatch(latestFinalMatchRef.current ?? finalMatch);
+        setActiveEvent(null);
+        resetEffects();
+        setIsAnimating(false);
+        isPlayingRef.current = false;
+      }
     }
-    if (finalMatch.result.status === "finished") {
+    if (!cancelled() && finalMatch.result.status === "finished") {
       onBattleFinished();
     }
   }
@@ -747,17 +776,26 @@ export function Battle({
             className="unit-layer"
             style={layerStyle(ANIMATION_SPEED)}
           >
-            {(match?.units ?? []).map((unit) => (
-              <UnitToken
-                acting={unit.id === activeEvent?.actor_id}
-                dying={dyingIds.includes(unit.id)}
-                key={unit.id}
-                lunge={lunges.find((entry) => entry.unitId === unit.id) ?? null}
-                rarity={cards.find((card) => card.id === unit.card_id)?.rarity ?? "common"}
-                targeted={unit.id === activeEvent?.target_id}
-                unit={unit}
-              />
-            ))}
+            {/* Render in a stable order (by id), NOT the match.units array order.
+                At a collision impact the dying units (the ones mid-strike) get
+                moved to the end of match.units by mergeUnitsHp — that reorders
+                their DOM nodes while the strike keyframe is running, which can
+                restart the animation and make the collision "flash twice". A
+                position-independent key order keeps each token's DOM slot fixed;
+                stacking during a lunge is handled by .lunging { z-index }. */}
+            {[...(match?.units ?? [])]
+              .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+              .map((unit) => (
+                <UnitToken
+                  acting={unit.id === activeEvent?.actor_id}
+                  dying={dyingIds.includes(unit.id)}
+                  key={unit.id}
+                  lunge={lunges.find((entry) => entry.unitId === unit.id) ?? null}
+                  rarity={cards.find((card) => card.id === unit.card_id)?.rarity ?? "common"}
+                  targeted={unit.id === activeEvent?.target_id}
+                  unit={unit}
+                />
+              ))}
             {popups.map((popup) => (
               <DamagePopupView key={popup.key} popup={popup} />
             ))}
