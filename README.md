@@ -105,4 +105,8 @@ npm run build
 
 ## Google Login
 
-Пока работает локальный dev-вход через Google-кнопку. Для настоящего OAuth нужно создать Google Cloud OAuth client. Детали: [docs/google-oauth.md](docs/google-oauth.md).
+Локальный dev-вход через Google-кнопку работает без настройки (`ENVIRONMENT=local`).
+Настоящий Google OAuth **уже реализован** и включается env-переменными `GOOGLE_OAUTH_*`
+(редирект `GET /api/auth/google/login`, callback `GET /api/auth/google/callback` —
+см. ARCHITECTURE §2.2 и [docs/DEPLOY.md](docs/DEPLOY.md)). Настройка Google Cloud
+OAuth client — [docs/google-oauth.md](docs/google-oauth.md).
