@@ -66,6 +66,21 @@ function iterationLabel(step: number | null): string {
   return `Итерация ${step}`;
 }
 
+// Board cell index under a viewport point, or null. Used for drag-and-drop drops;
+// the drag ghost is pointer-events:none, so it never shadows the cell here.
+function cellUnderPoint(x: number, y: number): number | null {
+  const el = document.elementFromPoint(x, y);
+  const cell = el?.closest?.(".board-cell") as HTMLElement | null;
+  if (!cell || cell.dataset.cell == null) {
+    return null;
+  }
+  return Number(cell.dataset.cell);
+}
+
+// Pixels the pointer must travel before a hand-card press becomes a drag (below
+// this it stays a tap that selects the card).
+const DRAG_THRESHOLD = 6;
+
 export function Battle({
   cards,
   onBattleFinished,
@@ -103,6 +118,23 @@ export function Battle({
   // beyond micro_step (COMBAT_REWORK §18.3).
   const [iterationStep, setIterationStep] = React.useState<number | null>(null);
   const [iterationVisible, setIterationVisible] = React.useState(false);
+  // Drag-and-drop placement: dragStartRef tracks the in-flight pointer drag (mouse
+  // or touch); dragGhost drives the floating card preview and drop highlight.
+  // suppressClickRef swallows the click that a browser fires after a drag release.
+  const dragStartRef = React.useRef<{
+    card: CollectionCard;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressClickRef = React.useRef(false);
+  const [dragGhost, setDragGhost] = React.useState<{
+    x: number;
+    y: number;
+    cell: number | null;
+    valid: boolean;
+    name: string;
+  } | null>(null);
   const [realtimeStatus, setRealtimeStatus] =
     React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const isRealtimeBusyRef = React.useRef(false);
@@ -700,16 +732,47 @@ export function Battle({
       showCellNotice(position, "Сначала выбери карту в руке");
       return;
     }
+    placeCardOnCell(selectedCard, cell);
+  }
+
+  // Whether `card` can be planned onto `cell` right now — the same checks as
+  // placeCardOnCell but side-effect-free, for drag-target highlighting.
+  function canPlaceCard(card: CollectionCard, cell: number): boolean {
+    if (isResolving || isAnimating || isFinished) {
+      return false;
+    }
+    const position = cellPosition(cell);
+    if (position.row !== 4 || plannedUnitAt(position.row, position.col)) {
+      return false;
+    }
+    const existingUnit = unitAt(position.row, position.col);
+    if (existingUnit?.side === "bottom") {
+      return false;
+    }
+    if (existingUnit?.side === "top" && unitAt(position.row - 1, position.col)) {
+      return false;
+    }
+    return availableMana >= card.cost;
+  }
+
+  // Validate and add a placement. Shared by click-to-place and drag-and-drop;
+  // shows a cell notice and returns false when the spot is not legal.
+  function placeCardOnCell(card: CollectionCard, cell: number): boolean {
+    const position = cellPosition(cell);
+    if (plannedUnitAt(position.row, position.col)) {
+      showCellNotice(position, "Клетка уже в плане");
+      return false;
+    }
     if (position.row !== 4) {
       logBattleEvent("battle_cell_rejected", { reason: "not_spawn_row", position });
       showCellNotice(position, "Ставить можно только на ближайший ряд");
-      return;
+      return false;
     }
     const existingUnit = unitAt(position.row, position.col);
     if (existingUnit?.side === "bottom") {
       logBattleEvent("battle_cell_rejected", { reason: "occupied", position });
       showCellNotice(position, "Клетка уже занята");
-      return;
+      return false;
     }
     if (existingUnit?.side === "top" && unitAt(position.row - 1, position.col)) {
       logBattleEvent("battle_cell_rejected", {
@@ -718,35 +781,36 @@ export function Battle({
         displacedUnitId: existingUnit.id,
       });
       showCellNotice(position, "Некуда вытолкнуть: клетка за врагом занята");
-      return;
+      return false;
     }
-    if (availableMana < selectedCard.cost) {
+    if (availableMana < card.cost) {
       logBattleEvent("battle_cell_rejected", {
         reason: "not_enough_mana",
         position,
-        selectedCardId: selectedCard.id,
+        selectedCardId: card.id,
         availableMana,
       });
       showCellNotice(position, "Не хватает маны");
-      return;
+      return false;
     }
-    const nextPlacements = [...placements, { card_id: selectedCard.id, ...position }];
+    const nextPlacements = [...placements, { card_id: card.id, ...position }];
     setPlacements(nextPlacements);
     // The planned card is consumed from the hand until the plan is cancelled.
     setSelectedCard(null);
     logClientEvent(
       "battle_plan_added",
       battleSnapshot(match, nextPlacements, {
-        added: { card_id: selectedCard.id, ...position },
+        added: { card_id: card.id, ...position },
         displacedUnitId: existingUnit?.id ?? null,
-        availableManaAfterPlan: availableMana - selectedCard.cost,
+        availableManaAfterPlan: availableMana - card.cost,
       }),
     );
     setBattleMessage(
       existingUnit
-        ? `${selectedCard.name} выталкивает ${shortCardName(existingUnit.card_id)}.`
-        : `${selectedCard.name} готовится выйти на поле.`,
+        ? `${card.name} выталкивает ${shortCardName(existingUnit.card_id)}.`
+        : `${card.name} готовится выйти на поле.`,
     );
+    return true;
   }
 
   function handleSelectCard(card: CollectionCard) {
@@ -757,12 +821,76 @@ export function Battle({
     logBattleEvent("battle_card_selected", { cardId: card.id, cost: card.cost });
   }
 
+  // --- Drag-and-drop placement (pointer events: one path for mouse and touch) ---
+
+  function handleCardPointerDown(event: React.PointerEvent, card: CollectionCard) {
+    if (isResolving || isAnimating || isFinished) {
+      return;
+    }
+    suppressClickRef.current = false;
+    dragStartRef.current = { card, startX: event.clientX, startY: event.clientY, active: false };
+    // Keep receiving move/up on this button even after the pointer leaves it.
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Not fatal: some environments reject capture on synthetic/edge pointers.
+    }
+  }
+
+  function handleCardPointerMove(event: React.PointerEvent) {
+    const start = dragStartRef.current;
+    if (!start) {
+      return;
+    }
+    if (!start.active) {
+      if (Math.hypot(event.clientX - start.startX, event.clientY - start.startY) < DRAG_THRESHOLD) {
+        return;
+      }
+      // Cross the threshold → this is a drag: reflect selection and show the ghost.
+      start.active = true;
+      setSelectedCard(start.card);
+    }
+    const cell = cellUnderPoint(event.clientX, event.clientY);
+    setDragGhost({
+      x: event.clientX,
+      y: event.clientY,
+      cell,
+      valid: cell != null && canPlaceCard(start.card, cell),
+      name: start.card.name,
+    });
+  }
+
+  function handleCardPointerUp(event: React.PointerEvent) {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    setDragGhost(null);
+    if (!start || !start.active) {
+      // A tap, not a drag — let the button's onClick select the card.
+      return;
+    }
+    // A real drag ended: swallow the trailing click and drop onto the cell (if any).
+    suppressClickRef.current = true;
+    const cell = cellUnderPoint(event.clientX, event.clientY);
+    if (cell != null) {
+      placeCardOnCell(start.card, cell);
+    }
+  }
+
   function dismissResult() {
     setResultDismissed(true);
   }
 
   return (
     <div className="battle-page">
+      {dragGhost ? (
+        <div
+          aria-hidden
+          className={`card-drag-ghost${dragGhost.valid ? " valid" : ""}`}
+          style={{ left: dragGhost.x, top: dragGhost.y }}
+        >
+          {dragGhost.name}
+        </div>
+      ) : null}
       <section className="battle-stage">
         <div className="battle-topbar">
           <button
@@ -805,7 +933,17 @@ export function Battle({
               const shouldShowPlan = Boolean(planned && (!isAnimating || !unit));
               return (
                 <button
-                  className={cell >= 12 ? "board-cell spawn" : "board-cell"}
+                  className={[
+                    cell >= 12 ? "board-cell spawn" : "board-cell",
+                    dragGhost && dragGhost.cell === cell
+                      ? dragGhost.valid
+                        ? "drop-ok"
+                        : "drop-bad"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-cell={cell}
                   key={cell}
                   onClick={() => handleCellClick(cell)}
                 >
@@ -890,7 +1028,17 @@ export function Battle({
                   .join(" ")}
                 disabled={isResolving || isAnimating || isFinished || entry.planned}
                 key={entry.key}
-                onClick={() => handleSelectCard(entry.card!)}
+                onClick={() => {
+                  // Swallow the click that follows a drag; taps fall through to select.
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  handleSelectCard(entry.card!);
+                }}
+                onPointerDown={(event) => handleCardPointerDown(event, entry.card!)}
+                onPointerMove={handleCardPointerMove}
+                onPointerUp={handleCardPointerUp}
               >
                 <Card card={entry.card} />
               </button>

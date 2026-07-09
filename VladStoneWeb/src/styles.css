@@ -703,6 +703,22 @@ nav {
   background: #dbe8de;
 }
 
+/* Drag-and-drop: the cell under the pointer while dragging a hand card —
+   green when the card can drop there, red when it cannot. */
+.board-cell.drop-ok,
+.board-cell.drop-ok:hover {
+  border-color: #2f7fd0;
+  background: #d3e6fb;
+  box-shadow: inset 0 0 0 2px #2f7fd0;
+  transform: translateY(-1px);
+}
+
+.board-cell.drop-bad,
+.board-cell.drop-bad:hover {
+  border-color: #b94d42;
+  background: #f4ddd9;
+}
+
 /* Resolve/animation lock: board stays fully readable, only input is muted. */
 .board.locked .board-cell {
   cursor: default;
@@ -840,6 +856,13 @@ nav {
   border-radius: 12px;
   background: transparent;
   transition: transform 140ms ease;
+  /* Own the gesture so a touch-drag onto the board doesn't scroll the page. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.hand-card:active:not(:disabled) {
+  cursor: grabbing;
 }
 
 .hand-card:hover:not(:disabled) {
@@ -855,6 +878,27 @@ nav {
 /* Hand card already planned onto the board this turn. */
 .hand-card.planned {
   opacity: 0.4;
+}
+
+/* Floating preview that follows the pointer while dragging a hand card onto the
+   board. pointer-events:none so it never shadows the cell hit-test underneath. */
+.card-drag-ghost {
+  position: fixed;
+  z-index: 40;
+  transform: translate(-50%, -50%) rotate(-3deg);
+  padding: 0.4em 0.8em;
+  border-radius: 8px;
+  background: rgb(24 26 22 / 0.9);
+  color: #f8faf6;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgb(16 20 18 / 0.4);
+}
+
+.card-drag-ghost.valid {
+  background: rgb(47 127 208 / 0.94);
 }
 
 /* Freshly drawn card flies in from the deck stack (sits to the right). */
