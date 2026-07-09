@@ -107,7 +107,8 @@ export type CombatMatch = {
   log: Array<{ message: string }>;
   events: CombatEvent[];
   result: {
-    status: "active" | "finished";
+    /** "expired" — матч закрыт сервером (напр. сменились правила боя), не проигрыш. */
+    status: "active" | "finished" | "expired";
     winner_id: string | null;
     reward_coins: number;
   };

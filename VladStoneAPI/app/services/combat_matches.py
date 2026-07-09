@@ -7,12 +7,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import CombatMatchRecord
-from app.domain.combat.models import MatchLifecycleStatus, MatchState
+from app.domain.combat.constants import RULESET_VERSION
+from app.domain.combat.models import CombatLogEntry, MatchLifecycleStatus, MatchState
 
 ACTIVE_MATCH_STATUSES = (
     MatchLifecycleStatus.PLANNING.value,
     MatchLifecycleStatus.RESOLVING.value,
 )
+
+# Player-facing note appended to the log when the ruleset gate expires a match.
+RULESET_EXPIRED_MESSAGE = "Правила боя обновились — матч завершён. Начни новый бой."
 
 
 class CombatMatchStore(Protocol):
@@ -120,6 +124,28 @@ def expire_stale_combat_matches(
         older_than=older_than,
         owner_user_id=owner_user_id,
     )
+
+
+def expire_combat_match_if_outdated(record: CombatMatchRecord) -> MatchState | None:
+    """Gate: a match saved under another RULESET_VERSION never reaches the resolver.
+
+    Rules change between deploys (v4 rework); replaying an old JSON state with a
+    new resolver is undefined behaviour (ARCH §8.7). Such a match is gracefully
+    expired instead: result.status "expired" (not a loss), a player-facing log
+    line, no rewards. Returns the expired state so callers can broadcast it,
+    or None when the version matches (or the match is already over).
+    """
+    if record.status not in ACTIVE_MATCH_STATUSES:
+        return None
+    match = load_match(record)
+    if match.ruleset_version == RULESET_VERSION:
+        return None
+    match.status = MatchLifecycleStatus.EXPIRED
+    match.planning_deadline = None
+    match.result.status = "expired"
+    match.log.append(CombatLogEntry(message=RULESET_EXPIRED_MESSAGE))
+    save_match(record, match)
+    return match
 
 
 def expire_combat_match_if_stale(record: CombatMatchRecord, *, older_than: datetime) -> bool:

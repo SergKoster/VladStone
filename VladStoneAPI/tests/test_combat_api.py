@@ -7,10 +7,15 @@ from sqlalchemy import select
 from app.db.models import AuditLog, CombatMatchRecord
 from app.db.session import SessionLocal
 from app.domain.combat.cards import DECK_CARD_IDS
+from app.domain.combat.constants import RULESET_VERSION
 from app.domain.combat.models import MatchLifecycleStatus, Position
 from app.domain.combat.rules import RANGER_CARD, create_player_match, create_unit
 from app.main import create_app
-from app.services.combat_matches import create_combat_match_record, load_match
+from app.services.combat_matches import (
+    RULESET_EXPIRED_MESSAGE,
+    create_combat_match_record,
+    load_match,
+)
 from app.services.combat_turn_timers import resolve_expired_planning_matches
 
 
@@ -272,6 +277,93 @@ def test_expired_planning_matches_can_be_resolved_without_client_request() -> No
         resolved = load_match(record)
     assert resolved.turn == 2
     assert resolved.status == MatchLifecycleStatus.PLANNING
+
+
+def test_outdated_ruleset_match_expires_on_get_and_rejects_resolve() -> None:
+    client = TestClient(create_app())
+    match = create_player_match()
+    match.ruleset_version = RULESET_VERSION + 1
+    with SessionLocal() as db:
+        create_combat_match_record(db, match=match, owner_user_id=None)
+        db.commit()
+
+    get_response = client.get(f"/api/combat/{match.id}")
+    assert get_response.status_code == 200
+    payload = get_response.json()["match"]
+    assert payload["status"] == "expired"
+    assert payload["result"]["status"] == "expired"
+    assert payload["result"]["winner_id"] is None
+    assert any(RULESET_EXPIRED_MESSAGE in entry["message"] for entry in payload["log"])
+
+    resolve_response = client.post(
+        "/api/combat/resolve",
+        json={"match_id": match.id, "turn": match.turn, "placements": []},
+    )
+    assert resolve_response.status_code == 409
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match.id)
+        assert record is not None
+        assert record.status == MatchLifecycleStatus.EXPIRED.value
+        state = load_match(record)
+    # The resolver never ran: still turn 1, no bot units, no reward.
+    assert state.turn == 1
+    assert state.units == []
+    assert state.result.reward_coins == 0
+
+
+def test_outdated_ruleset_match_is_expired_not_resolved_by_timer_worker() -> None:
+    # Deadline already passed — without the gate the worker would resolve it.
+    match = create_player_match(now=datetime.now(UTC) - timedelta(minutes=1))
+    match.ruleset_version = RULESET_VERSION + 1
+    with SessionLocal() as db:
+        create_combat_match_record(db, match=match, owner_user_id=None)
+        changed = resolve_expired_planning_matches(db)
+        db.commit()
+
+    # The gate reports the state change so the worker broadcasts it to clients.
+    assert match.id in {state.id for state in changed}
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match.id)
+        assert record is not None
+        state = load_match(record)
+    assert state.status == MatchLifecycleStatus.EXPIRED
+    assert state.result.status == "expired"
+    assert state.turn == 1
+
+
+def test_outdated_ruleset_match_excluded_from_active_list() -> None:
+    client = TestClient(create_app())
+    email = f"ruleset-gate-{uuid4().hex}@example.com"
+    login_response = client.post(
+        "/api/auth/google/dev-login",
+        json={"email": email, "name": "Gate Player"},
+    )
+    assert login_response.status_code == 200
+    user_id = login_response.json()["user"]["id"]
+
+    match = create_player_match()
+    match.ruleset_version = RULESET_VERSION + 1
+    with SessionLocal() as db:
+        create_combat_match_record(db, match=match, owner_user_id=user_id)
+        db.commit()
+
+    active_response = client.get("/api/combat/active")
+    assert active_response.status_code == 200
+    assert active_response.json()["matches"] == []
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match.id)
+        assert record is not None
+        assert record.status == MatchLifecycleStatus.EXPIRED.value
+        actions = list(
+            db.scalars(
+                select(AuditLog.action).where(
+                    AuditLog.action == "combat.match_expired_ruleset"
+                )
+            )
+        )
+    assert actions
 
 
 def test_stale_authenticated_match_expires_before_active_list() -> None:

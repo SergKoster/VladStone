@@ -8,7 +8,11 @@ from app.db.models import CombatMatchRecord
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
 from app.domain.combat.rules import apply_simple_bot_turn, resolve_turn
 from app.domain.combat.timing import is_planning_deadline_expired
-from app.services.combat_matches import load_match, save_match
+from app.services.combat_matches import (
+    expire_combat_match_if_outdated,
+    load_match,
+    save_match,
+)
 from app.services.rewards import claim_combat_reward
 
 
@@ -19,6 +23,12 @@ def resolve_expired_planning_match(
     now: datetime | None = None,
 ) -> MatchState | None:
     checked_at = now or datetime.now(UTC)
+    # Ruleset gate first: an old-version match must never enter the resolver,
+    # deadline or not. Returning the expired state reuses the callers' existing
+    # "state changed → commit + broadcast" path (HTTP routes, WS connect, worker).
+    outdated = expire_combat_match_if_outdated(record)
+    if outdated is not None:
+        return outdated
     match = load_match(record)
     if not is_planning_deadline_expired(match, now=checked_at):
         return None

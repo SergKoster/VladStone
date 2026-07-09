@@ -22,6 +22,7 @@ from app.services.accounts import audit
 from app.services.auth import get_user_by_refresh_token
 from app.services.combat_matches import (
     create_combat_match_record,
+    expire_combat_match_if_outdated,
     expire_combat_match_if_stale,
     expire_stale_combat_matches,
     get_combat_match_record,
@@ -101,6 +102,21 @@ def list_active_combat(
             {"user_id": user.id, "expired_count": expired_count},
         )
     records = list_active_combat_match_records(db, owner_user_id=user.id)
+    # Ruleset gate: matches from an older ruleset are expired here instead of
+    # being offered for restore (the client must never resume them).
+    outdated_ids = [
+        record.id for record in records if expire_combat_match_if_outdated(record) is not None
+    ]
+    if outdated_ids:
+        for match_id in outdated_ids:
+            audit(db, user.id, "combat.match_expired_ruleset", {"match_id": match_id})
+        db.commit()
+        append_dev_log(
+            "combat-server.jsonl",
+            "combat_matches_expired_ruleset",
+            {"user_id": user.id, "match_ids": outdated_ids},
+        )
+        records = [record for record in records if record.id not in outdated_ids]
     return {
         "matches": [
             combat_response(load_match(record))["match"]
@@ -135,6 +151,11 @@ async def resolve_combat_turn(
     deadline_resolved = _resolve_expired_record_if_needed(db, record)
     if deadline_resolved is not None:
         await match_channel_manager.broadcast_match_update(deadline_resolved)
+        if deadline_resolved.status == MatchLifecycleStatus.EXPIRED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Combat ruleset changed; match expired",
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn deadline has passed",
@@ -297,10 +318,13 @@ def _resolve_expired_record_if_needed(db: Session, record) -> MatchState | None:
         resolved = resolve_expired_planning_match(db, record)
         if resolved is None:
             return None
+        # The ruleset gate also lands here: an old-version match comes back
+        # EXPIRED (never resolved) and gets its own audit trail.
+        expired_by_gate = resolved.status == MatchLifecycleStatus.EXPIRED
         audit(
             db,
             record.owner_user_id,
-            "combat.turn_deadline_resolved",
+            "combat.match_expired_ruleset" if expired_by_gate else "combat.turn_deadline_resolved",
             {
                 "match_id": resolved.id,
                 "turn": resolved.turn,
@@ -316,7 +340,7 @@ def _resolve_expired_record_if_needed(db: Session, record) -> MatchState | None:
         return None
     append_dev_log(
         "combat-server.jsonl",
-        "combat_turn_deadline_resolved",
+        "combat_match_expired_ruleset" if expired_by_gate else "combat_turn_deadline_resolved",
         {"match": _match_snapshot(resolved)},
     )
     return resolved

@@ -141,7 +141,10 @@ export function Battle({
 
   const player = match?.players.find((candidate) => candidate.id === "player");
   const bot = match?.players.find((candidate) => candidate.id === "bot");
-  const isFinished = match?.result.status === "finished";
+  // "expired" is terminal too (server closed the match, e.g. ruleset changed):
+  // the battle locks and the result overlay explains — it is not a loss.
+  const isFinished =
+    match?.result.status === "finished" || match?.result.status === "expired";
   const playerMana = player?.mana ?? 0;
   const plannedCost = placements.reduce((sum, placement) => {
     const card = cards.find((candidate) => candidate.id === placement.card_id);
@@ -285,7 +288,7 @@ export function Battle({
       setPlacements([]);
       setSelectedCard(null);
       setSecondsLeft(secondsFromDeadline(resolvedMatch));
-      setIsTimerRunning(resolvedMatch.result.status !== "finished");
+      setIsTimerRunning(resolvedMatch.result.status === "active");
       setBattleMessage("Ход разыгран.");
     } catch (error) {
       logClientEvent(
@@ -460,7 +463,7 @@ export function Battle({
     setPlacements([]);
     setSelectedCard(null);
     setSecondsLeft(secondsFromDeadline(resolvedMatch));
-    setIsTimerRunning(resolvedMatch.result.status !== "finished");
+    setIsTimerRunning(resolvedMatch.result.status === "active");
     setBattleMessage("Бой обновлён по realtime.");
   }
 
@@ -1175,6 +1178,19 @@ function UnitBadge({
 }
 
 function ResultOverlay({ match, onClose }: { match: CombatMatch; onClose: () => void }) {
+  // Server closed the match without an outcome (ruleset changed between
+  // deploys) — neither a win nor a loss, no reward line.
+  if (match.result.status === "expired") {
+    return (
+      <div className="result-backdrop" onClick={onClose}>
+        <section className="result-panel" onClick={(event) => event.stopPropagation()}>
+          <strong>Матч завершён</strong>
+          <span>Правила боя обновились — начни новый бой.</span>
+          <button onClick={onClose}>Понятно</button>
+        </section>
+      </div>
+    );
+  }
   const didWin = match.result.winner_id === "player";
   return (
     <div className="result-backdrop" onClick={onClose}>
