@@ -19,6 +19,7 @@ from app.domain.combat.engine import (
     Status,
     UnitBlueprint,
     UnitStats,
+    apply_forced_stance,
     current_stance,
     spawn_unit,
     tick_statuses,
@@ -92,31 +93,42 @@ def test_program_requires_open_ended_final_phase() -> None:
         )
 
 
-# --- Стойка как производное + наложения (Q2 LIFO, F1 маскировка) ---
+# --- Стойка как производное + наложения (Q2 перезапись, F1 маскировка) ---
 
 
-def test_forced_stance_masks_program_and_last_active_wins() -> None:
+def test_forced_stance_overrides_replace_previous_ones() -> None:
     blueprint = make_blueprint()
     unit = make_unit(blueprint)
     assert current_stance(unit, blueprint) == Stance.DEFENSE  # разогрев
 
-    unit.statuses.append(Status(id=STATUS_FORCED_STANCE, ttl=2, stance=Stance.ATTACK))
+    # «Паника»: Атака на 2 хода.
+    unit.statuses = apply_forced_stance(unit.statuses, stance=Stance.ATTACK, ttl=2)
     assert current_stance(unit, blueprint) == Stance.ATTACK
 
-    # Второе наложение поверх — побеждает последнее активное (Q2, LIFO).
-    unit.statuses.append(Status(id=STATUS_FORCED_STANCE, ttl=1, stance=Stance.DEFENSE))
+    # «Окопаться» поверх: Q2-перезапись — «Паника» стёрта насовсем.
+    unit.statuses = apply_forced_stance(unit.statuses, stance=Stance.DEFENSE, ttl=1)
+    forced = [s for s in unit.statuses if s.id == STATUS_FORCED_STANCE]
+    assert len(forced) == 1
     assert current_stance(unit, blueprint) == Stance.DEFENSE
 
-    # Верхний истёк (ttl 1 — «на 1 ход») → вступает предыдущий ещё активный.
+    # «Окопаться» истекло (ttl 1 — «на 1 ход») → сразу врождённая программа
+    # «говорит сейчас» (F1: маска, не пауза расписания). «Паника» НЕ
+    # возвращается: юнит на 1-м ходу разогрева — Защита.
     unit.statuses = tick_statuses(unit.statuses)
-    assert current_stance(unit, blueprint) == Stance.ATTACK
-
-    # Истекли все → врождённая программа «говорит сейчас» (F1: маска, не пауза
-    # расписания): юнит уже 3-й ход на поле — программа даёт Атаку.
-    unit.statuses = tick_statuses(unit.statuses)
-    unit.turns_on_field = 3
     assert unit.statuses == []
-    assert current_stance(unit, blueprint) == Stance.ATTACK
+    assert current_stance(unit, blueprint) == Stance.DEFENSE
+
+
+def test_forced_stance_masks_program_until_expiry() -> None:
+    # Постоянное наложение (ttl=None) не тикает; после снятия юнит следует
+    # программе для ТЕКУЩЕГО turns_on_field, а не «с того же места».
+    blueprint = make_blueprint()
+    unit = make_unit(blueprint)
+    unit.statuses = apply_forced_stance(unit.statuses, stance=Stance.DEFENSE, ttl=None)
+    unit.turns_on_field = 5
+    assert current_stance(unit, blueprint) == Stance.DEFENSE
+    unit.statuses = [s for s in unit.statuses if s.id != STATUS_FORCED_STANCE]
+    assert current_stance(unit, blueprint) == Stance.ATTACK  # программа: 3+ ход
 
 
 def test_status_registry_and_shapes_are_enforced() -> None:

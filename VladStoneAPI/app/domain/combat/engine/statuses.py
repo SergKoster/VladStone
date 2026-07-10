@@ -37,12 +37,28 @@ class Status(BaseModel):
         return self
 
 
+def apply_forced_stance(
+    statuses: list[Status],
+    *,
+    stance: Stance,
+    ttl: int | None,
+) -> list[Status]:
+    """Наложить стойку с перезаписью (Q2, решение владельца июль 2026).
+
+    Новое наложение СТИРАЕТ предыдущее — стека нет, активно максимум одно;
+    истекло — юнит сразу возвращается к врождённой программе. «Воскресающих»
+    старых наложений не бывает, исход считается в уме (A3).
+    """
+    survivors = [status for status in statuses if status.id != STATUS_FORCED_STANCE]
+    survivors.append(Status(id=STATUS_FORCED_STANCE, ttl=ttl, stance=stance))
+    return survivors
+
+
 def tick_statuses(statuses: list[Status]) -> list[Status]:
     """Один тик конца хода (I4): ttl −1, истёкшие статусы уходят.
 
     Статус с ttl=1 активен весь ход наложения и исчезает на его границе —
-    «на 1 ход» = до конца текущего хода. Порядок оставшихся сохраняется:
-    он несёт LIFO-семантику наложенных стоек (Q2).
+    «на 1 ход» = до конца текущего хода.
     """
     survivors: list[Status] = []
     for status in statuses:

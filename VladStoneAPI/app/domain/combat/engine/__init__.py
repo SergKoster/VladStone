@@ -12,6 +12,7 @@ from app.domain.combat.engine.statuses import (
     STATUS_FORCED_STANCE,
     STATUS_POISON,
     Status,
+    apply_forced_stance,
     tick_statuses,
 )
 from app.domain.combat.engine.tags import (
@@ -48,6 +49,7 @@ __all__ = [
     "UnitBlueprint",
     "UnitState",
     "UnitStats",
+    "apply_forced_stance",
     "current_stance",
     "spawn_unit",
     "tick_statuses",
