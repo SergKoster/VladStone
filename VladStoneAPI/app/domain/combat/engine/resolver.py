@@ -242,7 +242,9 @@ def _resolve_spawn_push(
     for unit in reversed(chain):
         before = unit.row
         unit.row += forward
-        events.append(EngineEvent(kind="pushed", unit_id=unit.id, before=before, after=unit.row))
+        events.append(
+            EngineEvent(kind="pushed", unit_id=unit.id, before=before, after=unit.row, col=col)
+        )
     return events
 
 

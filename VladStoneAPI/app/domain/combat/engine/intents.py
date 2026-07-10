@@ -5,7 +5,7 @@
 руки/маны при резолве — невалидные детерминированно физзлятся, не падают.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SpellIntent(BaseModel):
@@ -16,6 +16,12 @@ class SpellIntent(BaseModel):
     # (все селекторы scope="board").
     row: int | None = Field(default=None, ge=0)
     col: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _cell_is_whole(self) -> "SpellIntent":
+        if (self.row is None) != (self.col is None):
+            raise ValueError("Spell target cell needs both row and col (or neither)")
+        return self
 
 
 class SpawnIntent(BaseModel):
