@@ -18,6 +18,7 @@ from app.domain.combat.engine.apply import (
     apply_effect,
     select_targets,
 )
+from app.domain.combat.engine.bot import plan_bot_intents
 from app.domain.combat.engine.cards import CardDefinition, CardType
 from app.domain.combat.engine.effects import (
     ApplyStatus,
@@ -115,6 +116,7 @@ __all__ = [
     "apply_forced_stance",
     "canonical_units_json",
     "current_stance",
+    "plan_bot_intents",
     "resolve_turn_v4",
     "run_death_wave",
     "select_targets",
