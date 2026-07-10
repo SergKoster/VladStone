@@ -38,6 +38,7 @@ from app.domain.combat.engine.patterns import forward_direction
 from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.statuses import STATUS_POISON, tick_statuses
 from app.domain.combat.engine.units import UnitState, current_stance, spawn_unit
+from app.domain.combat.engine.validation import validate_state
 from app.domain.combat.models import PlayerSide, PlayerState
 
 # Страховка от бесконечной фазы итераций (аналог MVP): юнит с 1 шагом
@@ -62,6 +63,9 @@ def resolve_turn_v4(
     intents_by_player = {entry.player_id: entry for entry in intents}
     order = _player_order(ctx, turn=turn, spell_coin=spell_coin)
     events: list[EngineEvent] = []
+    # Инварианты проверяются на входе и после каждой фазы/итерации: битое
+    # состояние падает у источника с именем контрольной точки (ARCH §5.1).
+    validate_state(ctx, checkpoint="entry")
 
     # Фазы 1–2: заклинания с чередованием; волна после каждого игрока (C1).
     for player in order:
@@ -70,6 +74,7 @@ def resolve_turn_v4(
             for spell in entry.spells:
                 events += _stamp(_cast_spell(ctx, player, spell), "spells")
         events += _stamp(run_death_wave(ctx), "spells")
+        validate_state(ctx, checkpoint=f"spells:{player.id}")
 
     # Фаза 3: спавны (тот же порядок игроков, что у заклинаний) + on_spawn,
     # затем мини-волна (E1).
@@ -79,6 +84,7 @@ def resolve_turn_v4(
             for spawn in entry.spawns:
                 events += _stamp(_spawn_from_hand(ctx, player, spawn), "spawn")
     events += _stamp(run_death_wave(ctx), "spawn")
+    validate_state(ctx, checkpoint="spawn")
 
     # Фаза 4: итерации юнитов по снапшот-намерениям (C4), волна на границе
     # каждой итерации (C5).
@@ -87,9 +93,11 @@ def resolve_turn_v4(
     # Фазы 5–6: эффекты конца хода в фикс-порядке (D3), затем волна.
     events += _stamp(_end_of_turn_effects(ctx), "end")
     events += _stamp(run_death_wave(ctx), "end")
+    validate_state(ctx, checkpoint="end")
 
     # Фаза 7: добор + мана следующего хода.
     events += _stamp(_draw_and_mana(ctx, turn=turn, mana_gain=mana_gain), "draw")
+    validate_state(ctx, checkpoint="draw")
     return events
 
 
@@ -256,6 +264,7 @@ def _run_iterations(ctx: EffectContext) -> list[EngineEvent]:
         # Граница итерации — волна смертей (C5); внутри итерации никто не
         # умирал (C3), волна собирает всех ушедших в минус разом.
         events += _stamp(run_death_wave(ctx), "iterations", iteration)
+        validate_state(ctx, checkpoint=f"iteration:{iteration}")
     return events
 
 

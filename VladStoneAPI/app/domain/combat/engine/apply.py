@@ -273,8 +273,11 @@ def _apply_status(effect: ApplyStatus, targets: list[UnitState]) -> list[EngineE
                 if existing.ttl is None or effect.ttl is None
                 else max(existing.ttl, effect.ttl)
             )
-            merged = existing.model_copy(
-                update={"stacks": existing.stacks + effect.stacks, "ttl": merged_ttl}
+            merged = Status(
+                id=existing.id,
+                stacks=existing.stacks + effect.stacks,
+                ttl=merged_ttl,
+                stance=existing.stance,
             )
             unit.statuses[unit.statuses.index(existing)] = merged
         events.append(

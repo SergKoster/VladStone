@@ -59,9 +59,12 @@ from app.domain.combat.engine.units import (
     unit_tags,
 )
 from app.domain.combat.engine.validation import (
+    StateValidationError,
+    canonical_units_json,
     validate_blueprint,
     validate_card,
     validate_spell_script,
+    validate_state,
 )
 
 __all__ = [
@@ -99,6 +102,7 @@ __all__ = [
     "Stance",
     "StancePhase",
     "StanceProgram",
+    "StateValidationError",
     "Status",
     "TargetSelector",
     "TargetSide",
@@ -108,6 +112,7 @@ __all__ = [
     "UnitStats",
     "apply_effect",
     "apply_forced_stance",
+    "canonical_units_json",
     "current_stance",
     "resolve_turn_v4",
     "run_death_wave",
@@ -118,4 +123,5 @@ __all__ = [
     "validate_blueprint",
     "validate_card",
     "validate_spell_script",
+    "validate_state",
 ]

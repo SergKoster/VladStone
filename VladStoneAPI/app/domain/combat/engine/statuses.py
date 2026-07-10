@@ -66,5 +66,9 @@ def tick_statuses(statuses: list[Status]) -> list[Status]:
             survivors.append(status)
             continue
         if status.ttl > 1:
-            survivors.append(status.model_copy(update={"ttl": status.ttl - 1}))
+            # Полноценное конструирование (не model_copy): прогоняет валидаторы
+            # модели — битый статус не переживёт тик незамеченным.
+            survivors.append(
+                Status(id=status.id, stacks=status.stacks, ttl=status.ttl - 1, stance=status.stance)
+            )
     return survivors
