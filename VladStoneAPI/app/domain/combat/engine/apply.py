@@ -1,0 +1,433 @@
+"""Исполнение примитивов Effect над состоянием боя (ARCH §5.1).
+
+Правила, зашитые здесь и не зависящие от карт:
+- цели всегда обходятся в порядке чтения поля (ряд, колонка) — единый
+  тайбрейк всего боя;
+- урон уводит HP в минус, смертей внутри эффекта нет — их проверяют волны на
+  границах под-фаз (C3/C5, резолвер P2.10);
+- структуры (тег structure) иммунны к урону эффектов по умолчанию (F4),
+  неподвижные (immovable) — к смене стойки и пушу (F3);
+- каждый применённый примитив оставляет EngineEvent-факты — сырьё для
+  клиентских combat-событий (P2.12).
+"""
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+from pydantic import BaseModel
+
+from app.domain.combat.deck import draw_card
+from app.domain.combat.engine.cards import CardDefinition, CardType
+from app.domain.combat.engine.effects import (
+    ApplyStatus,
+    ChangeStance,
+    DealDamage,
+    DrawCard,
+    Effect,
+    GrantTag,
+    Heal,
+    KillIf,
+    ModifyMana,
+    Push,
+    SpawnToken,
+)
+from app.domain.combat.engine.patterns import forward_direction
+from app.domain.combat.engine.stances import Stance
+from app.domain.combat.engine.statuses import Status, apply_forced_stance
+from app.domain.combat.engine.tags import TAG_IMMOVABLE, TAG_STRUCTURE, validate_tags
+from app.domain.combat.engine.targeting import TargetSelector, TargetSide
+from app.domain.combat.engine.units import (
+    UnitBlueprint,
+    UnitState,
+    spawn_unit,
+    unit_tags,
+)
+from app.domain.combat.models import PlayerSide, PlayerState
+
+# Кэп руки v4 (§18.2/E3): добор при полной руке пропускается, карта остаётся
+# в колоде.
+HAND_CAP = 6
+
+
+class EngineEvent(BaseModel):
+    """Факт применения примитива — сырьё для combat-событий клиента (P2.12)."""
+
+    kind: Literal[
+        "damage",
+        "heal",
+        "status_applied",
+        "stance_changed",
+        "tag_granted",
+        "pushed",
+        "killed",
+        "token_spawned",
+        "card_drawn",
+        "mana_changed",
+        "fizzled",
+    ]
+    unit_id: str | None = None
+    player_id: str | None = None
+    amount: int | None = None
+    before: int | None = None
+    after: int | None = None
+    status_id: str | None = None
+    stance: Stance | None = None
+    tag: str | None = None
+    row: int | None = None
+    col: int | None = None
+    card_id: str | None = None
+
+
+@dataclass
+class EffectContext:
+    """Рантайм-срез боя, над которым исполняются эффекты.
+
+    players — R12-участники (мана/колода/рука живут на них); units — юниты v4.
+    Резолвер (P2.10) собирает контекст из MatchState и разбирает обратно.
+    """
+
+    rows: int
+    cols: int
+    units: list[UnitState]
+    players: list[PlayerState]
+    blueprints: dict[str, UnitBlueprint]
+    cards: dict[str, CardDefinition] = field(default_factory=dict)
+    mana_cap: int = 10
+    # Счётчик токенов матча — детерминированные id призванных юнитов.
+    token_seq: int = 0
+
+    def blueprint_of(self, unit: UnitState) -> UnitBlueprint:
+        return self.blueprints[unit.blueprint_id]
+
+    def player_by_id(self, player_id: str) -> PlayerState:
+        for player in self.players:
+            if player.id == player_id:
+                return player
+        raise ValueError(f"Unknown player {player_id}")
+
+    def unit_at(self, row: int, col: int) -> UnitState | None:
+        for unit in self.units:
+            if unit.row == row and unit.col == col:
+                return unit
+        return None
+
+    def opponents_of(self, player_id: str) -> list[PlayerState]:
+        me = self.player_by_id(player_id)
+        return [player for player in self.players if player.team != me.team]
+
+
+def select_targets(
+    selector: TargetSelector,
+    ctx: EffectContext,
+    *,
+    caster_side: PlayerSide,
+    origin: tuple[int, int] | None = None,
+) -> list[UnitState]:
+    """Юниты-цели селектора в каноническом порядке чтения поля (ряд, колонка).
+
+    origin — точка применения (клетка каста / клетка юнита-носителя);
+    для scope="board" не нужна. Паттерн разворачивается от origin по стороне
+    кастера (H7: вперёд — от стороны, колонки абсолютны).
+    """
+    if selector.scope == "board":
+        candidates = list(ctx.units)
+    else:
+        if origin is None:
+            raise ValueError(f"scope={selector.scope!r} requires an origin cell")
+        if selector.scope == "cell":
+            cells = {origin}
+        else:
+            assert selector.pattern is not None  # гарантировано валидатором
+            cells = set(
+                selector.pattern.resolve(
+                    row=origin[0],
+                    col=origin[1],
+                    side=caster_side,
+                    rows=ctx.rows,
+                    cols=ctx.cols,
+                )
+            )
+        candidates = [unit for unit in ctx.units if (unit.row, unit.col) in cells]
+
+    result = []
+    for unit in candidates:
+        if selector.side == TargetSide.ALLY and unit.side != caster_side:
+            continue
+        if selector.side == TargetSide.ENEMY and unit.side == caster_side:
+            continue
+        if selector.tag is not None and selector.tag not in unit_tags(
+            unit, ctx.blueprint_of(unit)
+        ):
+            continue
+        result.append(unit)
+    return sorted(result, key=lambda unit: (unit.row, unit.col))
+
+
+def apply_effect(
+    effect: Effect,
+    ctx: EffectContext,
+    *,
+    caster_id: str,
+    targets: list[UnitState] | None = None,
+    cell: tuple[int, int] | None = None,
+) -> list[EngineEvent]:
+    """Применить один примитив; вернуть факты для событий.
+
+    targets — юниты из select_targets (юнит-скоуп примитивы); cell — клетка
+    применения (spawn_token); player-скоуп примитивы (draw_card, modify_mana)
+    работают от caster_id и игнорируют targets.
+    """
+    if isinstance(effect, DealDamage):
+        return _deal_damage(effect, ctx, targets or [])
+    if isinstance(effect, Heal):
+        return _heal(effect, targets or [])
+    if isinstance(effect, ApplyStatus):
+        return _apply_status(effect, targets or [])
+    if isinstance(effect, ChangeStance):
+        return _change_stance(effect, ctx, targets or [])
+    if isinstance(effect, GrantTag):
+        return _grant_tag(effect, ctx, targets or [])
+    if isinstance(effect, Push):
+        return _push(effect, ctx, targets or [])
+    if isinstance(effect, KillIf):
+        return _kill_if(effect, targets or [])
+    if isinstance(effect, SpawnToken):
+        return _spawn_token(effect, ctx, caster_id=caster_id, cell=cell)
+    if isinstance(effect, DrawCard):
+        return _draw_card(effect, ctx, caster_id=caster_id)
+    if isinstance(effect, ModifyMana):
+        return _modify_mana(effect, ctx, caster_id=caster_id)
+    raise TypeError(f"Unknown effect {effect!r}")  # недостижимо при валидном союзе
+
+
+def _deal_damage(
+    effect: DealDamage, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        # F4: структуры не получают урон от эффектов, пока карта не пробивает
+        # это явно (affects_structures).
+        if not effect.affects_structures and TAG_STRUCTURE in unit_tags(
+            unit, ctx.blueprint_of(unit)
+        ):
+            continue
+        before = unit.current_hp
+        unit.current_hp -= effect.amount  # минус легален внутри итерации (C3)
+        events.append(
+            EngineEvent(
+                kind="damage",
+                unit_id=unit.id,
+                amount=effect.amount,
+                before=before,
+                after=unit.current_hp,
+            )
+        )
+    return events
+
+
+def _heal(effect: Heal, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        before = unit.current_hp
+        unit.current_hp += effect.amount  # потолка нет (Q4)
+        events.append(
+            EngineEvent(
+                kind="heal",
+                unit_id=unit.id,
+                amount=effect.amount,
+                before=before,
+                after=unit.current_hp,
+            )
+        )
+    return events
+
+
+def _apply_status(effect: ApplyStatus, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        existing = next((s for s in unit.statuses if s.id == effect.status_id), None)
+        if existing is None:
+            unit.statuses.append(
+                Status(id=effect.status_id, stacks=effect.stacks, ttl=effect.ttl)
+            )
+        else:
+            # Стаки складываются (канон яда §5); срок — больший из двух,
+            # None (постоянный) побеждает. Дизайн конкретных статусов может
+            # уточнить это правило вместе с картами.
+            merged_ttl = (
+                None
+                if existing.ttl is None or effect.ttl is None
+                else max(existing.ttl, effect.ttl)
+            )
+            merged = existing.model_copy(
+                update={"stacks": existing.stacks + effect.stacks, "ttl": merged_ttl}
+            )
+            unit.statuses[unit.statuses.index(existing)] = merged
+        events.append(
+            EngineEvent(
+                kind="status_applied",
+                unit_id=unit.id,
+                status_id=effect.status_id,
+                amount=effect.stacks,
+            )
+        )
+    return events
+
+
+def _change_stance(
+    effect: ChangeStance, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        # F3: неподвижные (башни) не переводятся — башня не должна «поехать».
+        if TAG_IMMOVABLE in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue
+        unit.statuses = apply_forced_stance(unit.statuses, stance=effect.stance, ttl=effect.ttl)
+        events.append(EngineEvent(kind="stance_changed", unit_id=unit.id, stance=effect.stance))
+    return events
+
+
+def _grant_tag(effect: GrantTag, ctx: EffectContext, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        if effect.tag in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue  # уже есть — идемпотентно, без события
+        unit.granted_tags = validate_tags((*unit.granted_tags, effect.tag))
+        events.append(EngineEvent(kind="tag_granted", unit_id=unit.id, tag=effect.tag))
+    return events
+
+
+def _push(effect: Push, ctx: EffectContext, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        if TAG_IMMOVABLE in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue
+        step = forward_direction(unit.side)
+        if effect.direction == "backward":
+            step = -step
+        moved = 0
+        row = unit.row
+        # Двигаем клетка за клеткой; упёрлись в юнита/край — остановка (как у
+        # спавн-толчка H9: препятствие не пробивается).
+        for _ in range(effect.cells):
+            next_row = row + step
+            if not (0 <= next_row < ctx.rows) or ctx.unit_at(next_row, unit.col) is not None:
+                break
+            row = next_row
+            moved += 1
+        if moved == 0:
+            events.append(EngineEvent(kind="fizzled", unit_id=unit.id))
+            continue
+        before_row = unit.row
+        unit.row = row
+        events.append(
+            EngineEvent(
+                kind="pushed",
+                unit_id=unit.id,
+                before=before_row,
+                after=row,
+                row=row,
+                col=unit.col,
+            )
+        )
+    return events
+
+
+def _kill_if(effect: KillIf, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        if unit.current_hp <= 0:
+            continue  # уже обречён — граница под-фазы добьёт волной (C5)
+        condition = True
+        if effect.status_id is not None:
+            status = next((s for s in unit.statuses if s.id == effect.status_id), None)
+            condition = status is not None and status.stacks >= effect.min_stacks
+        if condition and effect.max_hp is not None:
+            condition = unit.current_hp <= effect.max_hp
+        if not condition:
+            continue
+        before = unit.current_hp
+        unit.current_hp = 0  # смерть оформит волна на границе под-фазы (C5)
+        events.append(EngineEvent(kind="killed", unit_id=unit.id, before=before, after=0))
+    return events
+
+
+def _spawn_token(
+    effect: SpawnToken,
+    ctx: EffectContext,
+    *,
+    caster_id: str,
+    cell: tuple[int, int] | None,
+) -> list[EngineEvent]:
+    if cell is None:
+        raise ValueError("spawn_token requires a target cell")
+    card = ctx.cards.get(effect.card_id)
+    if card is None or card.card_type != CardType.UNIT:
+        # Битая ссылка — баг контента: падаем громко (I7), не тихо в бою.
+        raise ValueError(f"spawn_token references invalid card {effect.card_id!r}")
+    row, col = cell
+    if not (0 <= row < ctx.rows and 0 <= col < ctx.cols) or ctx.unit_at(row, col) is not None:
+        # I5: клетка занята/вне поля — эффект детерминированно фейлится.
+        return [EngineEvent(kind="fizzled", card_id=effect.card_id, row=row, col=col)]
+    assert card.blueprint_id is not None  # гарантировано валидатором карты
+    blueprint = ctx.blueprints[card.blueprint_id]
+    owner = ctx.player_by_id(caster_id)
+    ctx.token_seq += 1
+    token = spawn_unit(
+        blueprint,
+        unit_id=f"{caster_id}_{card.id}_{ctx.token_seq}",
+        owner_id=owner.id,
+        side=owner.side,
+        row=row,
+        col=col,
+    )
+    ctx.units.append(token)
+    return [
+        EngineEvent(
+            kind="token_spawned",
+            unit_id=token.id,
+            player_id=owner.id,
+            card_id=card.id,
+            row=row,
+            col=col,
+        )
+    ]
+
+
+def _draw_card(effect: DrawCard, ctx: EffectContext, *, caster_id: str) -> list[EngineEvent]:
+    events = []
+    caster = ctx.player_by_id(caster_id)
+    receivers = [caster] if effect.who == "self" else ctx.opponents_of(caster_id)
+    for player in receivers:
+        for _ in range(effect.count):
+            # Кэп руки (E3): полная рука — добор пропущен, карта не сгорает.
+            if len(player.hand) >= HAND_CAP:
+                break
+            # Участник без deck-цикла (скриптовый бот MVP): добор — no-op,
+            # иначе перетасовка выдала бы ему колоду из воздуха.
+            if not player.deck and not player.hand:
+                break
+            if draw_card(player) is None:
+                break
+            events.append(EngineEvent(kind="card_drawn", player_id=player.id, amount=1))
+    return events
+
+
+def _modify_mana(effect: ModifyMana, ctx: EffectContext, *, caster_id: str) -> list[EngineEvent]:
+    events = []
+    caster = ctx.player_by_id(caster_id)
+    receivers = [caster] if effect.who == "self" else ctx.opponents_of(caster_id)
+    for player in receivers:
+        before = player.mana
+        player.mana = max(0, min(ctx.mana_cap, player.mana + effect.amount))
+        if player.mana != before:
+            events.append(
+                EngineEvent(
+                    kind="mana_changed",
+                    player_id=player.id,
+                    amount=player.mana - before,
+                    before=before,
+                    after=player.mana,
+                )
+            )
+    return events

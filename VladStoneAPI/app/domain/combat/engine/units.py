@@ -8,6 +8,7 @@ structure/tower/immovable. abilities у чертежа появятся вмес
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.domain.combat.engine.abilities import Ability
 from app.domain.combat.engine.patterns import CellPattern, SpawnZone
 from app.domain.combat.engine.stances import Stance, StanceProgram
 from app.domain.combat.engine.statuses import STATUS_FORCED_STANCE, Status
@@ -37,6 +38,7 @@ class UnitBlueprint(BaseModel):
     coverage_attack: CellPattern = CellPattern()
     spawn_zone: SpawnZone
     tags: tuple[str, ...] = ()
+    abilities: tuple[Ability, ...] = ()
 
     @field_validator("tags")
     @classmethod
@@ -63,6 +65,14 @@ class UnitState(BaseModel):
     # Наложенная стойка — максимум одна: apply_forced_stance перезаписывает
     # предыдущую (Q2, решение владельца).
     statuses: list[Status] = Field(default_factory=list)
+    # Теги, выданные эффектами в бою (grant_tag) — поверх базовых тегов
+    # чертежа; итог считает unit_tags().
+    granted_tags: tuple[str, ...] = ()
+
+    @field_validator("granted_tags")
+    @classmethod
+    def _check_granted_tags(cls, tags: tuple[str, ...]) -> tuple[str, ...]:
+        return validate_tags(tags)
 
 
 def spawn_unit(
@@ -84,6 +94,11 @@ def spawn_unit(
         current_hp=blueprint.stats.hp,
         turns_on_field=1,
     )
+
+
+def unit_tags(unit: UnitState, blueprint: UnitBlueprint) -> frozenset[str]:
+    """Итоговые теги юнита: базовые (чертёж) + выданные в бою (grant_tag)."""
+    return frozenset(blueprint.tags) | frozenset(unit.granted_tags)
 
 
 def current_stance(unit: UnitState, blueprint: UnitBlueprint) -> Stance:

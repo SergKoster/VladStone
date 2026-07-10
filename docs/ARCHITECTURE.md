@@ -180,8 +180,9 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
 > [COMBAT_REWORK.md](COMBAT_REWORK.md). Здесь — как это реализовать
 > **расширяемо, детерминированно и отказоустойчиво**. Строится в
 > `app/domain/combat/engine/` **рядом с MVP-правилами** (живой бой обслуживает
-> старый код до подмены в конце P2 + bump RULESET_VERSION). Сущности (§ниже)
-> реализованы (июль 2026, P2.8); словарь Effect/TargetSelector, резолвер фаз,
+> старый код до подмены в конце P2 + bump RULESET_VERSION). Реализовано (июль
+> 2026): сущности (P2.8) и словарь Effect/TargetSelector/Ability/SpellScript +
+> исполнение примитивов (P2.9, `apply.py`); резолвер фаз, validate_state,
 > события — следующие шаги COMBAT_REWORK §20 P2.
 
 **Три цели движка:** (1) новая карта = данные, не код; (2) полный детерминизм
@@ -206,11 +207,12 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
 - **`Status{id, stacks, ttl}`**: единый механизм для яда, щита, **и наложенной
   стойки** (forced-stance — статус с ttl, маскирующий врождённую стойку).
   Один механизм вместо двух — меньше кода, меньше багов.
-- **`Ability{trigger, condition?, effect, target}`**. Триггеры-хуки конвейера:
+- **`Ability{trigger, effect, target}`**. Триггеры-хуки конвейера:
   `on_spawn, on_turn_start, on_attack, on_damaged, on_death, on_turn_end,
-  on_stance_change`; для заклинаний `on_cast`. (`abilities` на blueprint'е
-  появляются вместе со словарём Effect — P2.9, чтобы сущности не тянули
-  недостроенные куски.)
+  on_stance_change`. Заклинание — `SpellScript{id, actions: [{effect,
+  target}...]}` (отыгрывается в спелл-фазе в submission-порядке, C1);
+  опциональные `condition` у способностей добавим, когда появится первая
+  карта с условием — пустую модель условий не строим.
 - **`Effect`** — примитив из **фиксированного словаря** (deal_damage, heal,
   apply_status, change_stance, spawn_token, push, kill_if, draw_card,
   modify_mana, grant_tag…). Карта комбинирует известные примитивы —
