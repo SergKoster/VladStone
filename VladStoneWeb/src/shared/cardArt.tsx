@@ -66,10 +66,15 @@ export function CardArt({
   const iconUrl = ICON_BY_ID[cardId];
   const bgUrl = RARITY_BG[rarity] ?? RARITY_BG.common;
   return (
+    // draggable=false: images are natively draggable, and that browser drag
+    // (ghost image + no-drop cursor) swallows the pointer events our
+    // hand-to-board drag-n-drop is built on when grabbing a card by its art.
     <div className="card-art" data-rarity={rarity}>
-      {bgUrl ? <img aria-hidden="true" alt="" className="card-art-bg" src={bgUrl} /> : null}
+      {bgUrl ? (
+        <img aria-hidden="true" alt="" className="card-art-bg" draggable={false} src={bgUrl} />
+      ) : null}
       {iconUrl ? (
-        <img alt="" className="card-art-icon" src={iconUrl} />
+        <img alt="" className="card-art-icon" draggable={false} src={iconUrl} />
       ) : (
         <span aria-hidden="true" className="card-art-glyph">
           {initials(label)}
