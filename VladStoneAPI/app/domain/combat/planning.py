@@ -18,14 +18,14 @@ def apply_placements(
     placements: list[tuple[str, Position]],
     *,
     owner_id: str,
-    side: PlayerSide,
     from_hand: bool = False,
 ) -> MatchState:
     updated = match.model_copy(deep=True)
     player = player_by_id(updated, owner_id)
+    side = player.side
     for index, (card_id, position) in enumerate(placements):
         card = CARD_BY_ID[card_id]
-        if from_hand and card_id not in updated.player_hand:
+        if from_hand and card_id not in player.hand:
             continue
         if player.mana < card.cost:
             continue
@@ -65,7 +65,7 @@ def apply_placements(
             )
         player.mana -= card.cost
         if from_hand:
-            updated.player_hand.remove(card_id)
+            player.hand.remove(card_id)
         unit = create_unit(
             unit_id=f"{owner_id}_{updated.turn}_{index}_{len(updated.units)}",
             owner_id=owner_id,

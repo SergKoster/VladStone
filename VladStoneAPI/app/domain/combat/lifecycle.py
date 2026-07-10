@@ -1,6 +1,5 @@
 from app.domain.combat.board import reward_for_result
 from app.domain.combat.events import log_and_event
-from app.domain.combat.helpers import player_by_id
 from app.domain.combat.models import (
     CombatEventType,
     CombatTargetKind,
@@ -29,16 +28,23 @@ def remove_dead_units(match: MatchState) -> None:
 def finish_match_if_needed(match: MatchState) -> bool:
     if match.result.status == "finished":
         return True
-    alive_players = [player for player in match.players if player.hero.hp > 0]
-    if len(alive_players) == len(match.players):
+    # Team-based finish (R12): the match ends once any team is fully wiped
+    # (no living heroes); the winner is the sole team still standing, a
+    # simultaneous wipe of everyone is a draw.
+    all_teams = {player.team for player in match.players}
+    alive_teams = {player.team for player in match.players if player.hero.hp > 0}
+    if alive_teams == all_teams:
         return False
 
-    player = player_by_id(match, "player")
-    winner = alive_players[0] if len(alive_players) == 1 else None
-    reward = reward_for_result(winner is not None and winner.id == player.id)
+    winner_team = next(iter(alive_teams)) if len(alive_teams) == 1 else None
+    winners = [player for player in match.players if player.team == winner_team]
+    # PvE reward semantics: the match-level reward is for the human side.
+    # Per-participant rewards (PvP) are a later phase — see claim_combat_reward.
+    human_won = any(not player.is_bot for player in winners)
     match.result.status = "finished"
-    match.result.winner_id = winner.id if winner else None
-    match.result.reward_coins = reward
+    match.result.winner_team = winner_team
+    match.result.winner_id = winners[0].id if len(winners) == 1 else None
+    match.result.reward_coins = reward_for_result(winner_team is not None and human_won)
     match.status = MatchLifecycleStatus.FINISHED
     log_and_event(
         match,

@@ -15,3 +15,11 @@ def player_by_id(match: MatchState, player_id: str) -> PlayerState:
         if player.id == player_id:
             return player
     raise ValueError(f"Unknown player {player_id}")
+
+
+def human_players(match: MatchState) -> list[PlayerState]:
+    return [player for player in match.players if not player.is_bot]
+
+
+def bot_players(match: MatchState) -> list[PlayerState]:
+    return [player for player in match.players if player.is_bot]

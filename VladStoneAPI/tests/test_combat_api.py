@@ -42,10 +42,19 @@ def test_start_and_resolve_combat_turn() -> None:
     match = start_response.json()["match"]
     assert match["turn"] == 1
     assert match["status"] == "planning"
+    # The payload names the seat it was serialized for.
+    viewer = next(p for p in match["players"] if p["id"] == match["viewer_id"])
+    opponent = next(p for p in match["players"] if p["id"] != match["viewer_id"])
+    assert not viewer["is_bot"]
+    assert viewer["team"] != opponent["team"]
     # Deck cycle: hand of 3 dealt from the shuffled deck, order kept secret.
-    assert len(match["player_hand"]) == 3
-    assert match["deck_count"] == len(DECK_CARD_IDS) - 3
-    assert "player_deck" not in match
+    assert len(viewer["hand"]) == 3
+    assert viewer["deck_count"] == len(DECK_CARD_IDS) - 3
+    # Anti-cheat: deck contents never serialize; a hand only goes to its owner.
+    for player_payload in match["players"]:
+        assert "deck" not in player_payload
+        assert "user_id" not in player_payload
+    assert opponent["hand"] == []
 
     get_response = client.get(f"/api/combat/{match['id']}")
     assert get_response.status_code == 200
@@ -55,7 +64,7 @@ def test_start_and_resolve_combat_turn() -> None:
     off_hand = next(
         card_id
         for card_id in ["banka", "test_ranger", "test_bruiser", "dolbiki"]
-        if card_id not in match["player_hand"]
+        if card_id not in viewer["hand"]
     )
     rejected = client.post(
         "/api/combat/resolve",
@@ -71,7 +80,7 @@ def test_start_and_resolve_combat_turn() -> None:
     cards_by_id = {
         card["id"]: card for card in client.get("/api/combat/catalog").json()["cards"]
     }
-    playable = min(match["player_hand"], key=lambda card_id: cards_by_id[card_id]["cost"])
+    playable = min(viewer["hand"], key=lambda card_id: cards_by_id[card_id]["cost"])
     placements = (
         [{"card_id": playable, "row": 4, "col": 1}]
         if cards_by_id[playable]["cost"] <= 2
@@ -90,9 +99,11 @@ def test_start_and_resolve_combat_turn() -> None:
         assert resolved["units"]
         assert resolved["log"]
     # End of turn draws one card back into the hand.
+    resolved_viewer = next(p for p in resolved["players"] if p["id"] == resolved["viewer_id"])
     expected_hand = 3 - len(placements) + 1
-    assert len(resolved["player_hand"]) == expected_hand
-    assert resolved["deck_count"] == len(DECK_CARD_IDS) - 4
+    assert len(resolved_viewer["hand"]) == expected_hand
+    assert resolved_viewer["hand_count"] == expected_hand
+    assert resolved_viewer["deck_count"] == len(DECK_CARD_IDS) - 4
 
     stale_response = client.post(
         "/api/combat/resolve",
@@ -112,9 +123,9 @@ def test_finished_combat_claims_reward_once_for_authenticated_user() -> None:
     user_id = login_response.json()["user"]["id"]
     before = client.get("/api/me").json()["coins"]
 
-    match = create_player_match()
-    player = next(candidate for candidate in match.players if candidate.id == "player")
-    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+    match = create_player_match(user_id=user_id)
+    player = next(candidate for candidate in match.players if not candidate.is_bot)
+    bot = next(candidate for candidate in match.players if candidate.is_bot)
     player.hero.hp = 1
     match.units = [
         create_unit(
@@ -258,8 +269,9 @@ def test_late_combat_actions_are_rejected_after_server_deadline() -> None:
         record = db.get(CombatMatchRecord, match.id)
         assert record is not None
         resolved = load_match(record)
+    human_id = next(player.id for player in resolved.players if not player.is_bot)
     assert resolved.turn == 2
-    assert all(unit.owner_id != "player" for unit in resolved.units)
+    assert all(unit.owner_id != human_id for unit in resolved.units)
     assert resolved.planning_deadline is not None
 
 

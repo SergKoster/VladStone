@@ -16,6 +16,11 @@ def add_turn_mana(current_mana: int, turn: int, cap: int = MANA_CAP) -> int:
     return min(cap, current_mana + mana_gain_for_turn(turn))
 
 
+def side_for_team(team: int) -> PlayerSide:
+    """Board side is derived from the team (R12): allies share a side."""
+    return PlayerSide.BOTTOM if team == 0 else PlayerSide.TOP
+
+
 def direction_for_side(side: PlayerSide) -> int:
     return 1 if side == PlayerSide.TOP else -1
 

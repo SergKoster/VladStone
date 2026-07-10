@@ -27,12 +27,19 @@ function mergeUnitsHp(current: CombatUnit[], snapshot: CombatUnit[]): CombatUnit
   return merged;
 }
 
-function mergePlayersHp(current: CombatMatch["players"], snapshot: SnapshotPlayers) {
-  const byId = new Map(current.map((player) => [player.id, player]));
-  return snapshot.map((player) => {
-    const prev = byId.get(player.id);
-    return prev
-      ? { ...player, hero: { ...player.hero, hp: Math.min(prev.hero.hp, player.hero.hp) } }
+// Keyed off the CURRENT players (snapshot values only overlay hero HP and
+// mana): snapshots carry no hand/deck/team fields, so replacing player objects
+// wholesale would wipe the viewer's hand mid-animation.
+export function mergePlayersHp(current: CombatMatch["players"], snapshot: SnapshotPlayers) {
+  const byId = new Map(snapshot.map((player) => [player.id, player]));
+  return current.map((player) => {
+    const snap = byId.get(player.id);
+    return snap
+      ? {
+          ...player,
+          mana: snap.mana,
+          hero: { ...player.hero, hp: Math.min(player.hero.hp, snap.hero.hp) },
+        }
       : player;
   });
 }

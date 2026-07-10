@@ -46,8 +46,12 @@ def resolve_turn(match: MatchState, *, now: datetime | None = None) -> MatchStat
         for unit in resolved.units:
             unit.remaining_steps = unit.stats.move_steps
             unit.remaining_attacks = unit.stats.attacks
-        # End of turn: the player draws the next card from the deck cycle.
-        draw_card(resolved)
+        # End of turn: every deck-playing participant draws the next card.
+        # The scripted test bot has no deck (fixed pattern); real bot decks
+        # arrive with the v4 engine.
+        for player in resolved.players:
+            if not player.is_bot:
+                draw_card(player)
         resolved.status = MatchLifecycleStatus.PLANNING
         # Freeze planning until the resolution animation has had time to play.
         buffer = resolution_buffer_seconds(len(resolved.events))

@@ -44,14 +44,16 @@ export function battleSnapshot(
   placements: Placement[],
   extra: Record<string, unknown> = {},
 ) {
-  const player = match?.players.find((candidate) => candidate.id === "player");
-  const bot = match?.players.find((candidate) => candidate.id === "bot");
+  const player = match?.players.find((candidate) => candidate.id === match.viewer_id);
+  const enemy = match?.players.find(
+    (candidate) => player && candidate.team !== player.team,
+  );
   return {
     turn: match?.turn ?? null,
     playerMana: player?.mana ?? null,
-    botMana: bot?.mana ?? null,
+    botMana: enemy?.mana ?? null,
     playerHeroHp: player?.hero.hp ?? null,
-    botHeroHp: bot?.hero.hp ?? null,
+    botHeroHp: enemy?.hero.hp ?? null,
     placements,
     units:
       match?.units.map((unit) => ({

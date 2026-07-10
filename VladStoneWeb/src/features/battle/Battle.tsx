@@ -16,7 +16,7 @@ import {
 import { Card } from "../../shared/Card";
 import { CardArt } from "../../shared/cardArt";
 import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
-import { applyEventHp, applyEventSnapshot, wait } from "./animationState";
+import { applyEventHp, applyEventSnapshot, mergePlayersHp, wait } from "./animationState";
 import {
   type AnimationSpeed,
   ANIMATION_WATCHDOG_MS,
@@ -139,8 +139,12 @@ export function Battle({
     React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const isRealtimeBusyRef = React.useRef(false);
 
-  const player = match?.players.find((candidate) => candidate.id === "player");
-  const bot = match?.players.find((candidate) => candidate.id === "bot");
+  // The server tags each payload with the seat it was serialized for; the
+  // enemy is anyone on another team (1v1: exactly one).
+  const player = match?.players.find((candidate) => candidate.id === match.viewer_id);
+  const enemy = match?.players.find(
+    (candidate) => player && candidate.team !== player.team,
+  );
   // "expired" is terminal too (server closed the match, e.g. ruleset changed):
   // the battle locks and the result overlay explains — it is not a loss.
   const isFinished =
@@ -160,7 +164,7 @@ export function Battle({
     placements.forEach((placement) => {
       plannedLeft[placement.card_id] = (plannedLeft[placement.card_id] ?? 0) + 1;
     });
-    return (match?.player_hand ?? []).map((cardId, index) => {
+    return (player?.hand ?? []).map((cardId, index) => {
       const card = cards.find((candidate) => candidate.id === cardId) ?? null;
       let planned = false;
       if ((plannedLeft[cardId] ?? 0) > 0) {
@@ -169,9 +173,9 @@ export function Battle({
       }
       return { key: `${cardId}-${index}`, cardId, card, planned };
     });
-  }, [cards, match?.player_hand, placements]);
+  }, [cards, player?.hand, placements]);
 
-  const deckCount = match?.deck_count ?? 0;
+  const deckCount = player?.deck_count ?? 0;
 
   // Draw animation: when the turn advances, the freshly drawn card (the hand's
   // last entry — the server appends draws) flies in from the deck stack.
@@ -179,7 +183,7 @@ export function Battle({
   const prevTurnRef = React.useRef(0);
   React.useEffect(() => {
     const turn = match?.turn ?? 0;
-    const hand = match?.player_hand ?? [];
+    const hand = player?.hand ?? [];
     // Any forward jump counts (the server may resolve turns by timer while the
     // client is away); a fresh mount (prev 0) does not animate.
     const isNextTurn = prevTurnRef.current > 0 && turn > prevTurnRef.current;
@@ -190,7 +194,7 @@ export function Battle({
       return () => window.clearTimeout(timerId);
     }
     return undefined;
-  }, [match?.turn, match?.player_hand]);
+  }, [match?.turn, player?.hand]);
 
   // Transient warnings shown right on the clicked cell (fade up and out).
   const [cellNotices, setCellNotices] = React.useState<
@@ -494,7 +498,9 @@ export function Battle({
       return;
     }
     const spawnedUnit = event.snapshot.units?.find((unit) => unit.id === event.actor_id);
-    if (spawnedUnit?.side !== "bottom") {
+    // Only the viewer's own spawns clear planned markers — they are the only
+    // units that ever have a local placement to clear.
+    if (!spawnedUnit || spawnedUnit.owner_id !== player?.id) {
       return;
     }
     setPlacements((current) =>
@@ -510,11 +516,16 @@ export function Battle({
     if (event.type === "death" && event.actor_id) {
       // Keep the dying unit on the board (skip its removal) so the fade plays.
       markDying(event.actor_id);
-      setMatch((current) => ({
-        ...(current ?? finalMatch),
-        players: event.snapshot.players ?? current?.players ?? finalMatch.players,
-        log: [...(current?.log ?? []), { message: event.message }].slice(-24),
-      }));
+      setMatch((current) => {
+        const base = current ?? finalMatch;
+        return {
+          ...base,
+          players: event.snapshot.players
+            ? mergePlayersHp(base.players, event.snapshot.players)
+            : base.players,
+          log: [...(current?.log ?? []), { message: event.message }].slice(-24),
+        };
+      });
     } else {
       setMatch((current) => applyEventSnapshot(current ?? finalMatch, event, finalMatch));
     }
@@ -904,8 +915,14 @@ export function Battle({
             {match ? "Новый бой" : "Старт"}
           </button>
         </div>
-        <div className={activeEvent?.target_id === "bot" ? "hero-line enemy hit" : "hero-line enemy"}>
-          Герой врага · {bot?.hero.hp ?? 20} HP
+        <div
+          className={
+            enemy != null && activeEvent?.target_id === enemy.id
+              ? "hero-line enemy hit"
+              : "hero-line enemy"
+          }
+        >
+          Герой врага · {enemy?.hero.hp ?? 20} HP
         </div>
         {iterationVisible ? (
           // While events actually play, the banner slot shows the current iteration
@@ -998,7 +1015,13 @@ export function Battle({
             ))}
           </div>
         </div>
-        <div className={activeEvent?.target_id === "player" ? "hero-line hit" : "hero-line"}>
+        <div
+          className={
+            player != null && activeEvent?.target_id === player.id
+              ? "hero-line hit"
+              : "hero-line"
+          }
+        >
           Твой герой · {player?.hero.hp ?? 20} HP
         </div>
         <div className="mana-bar" aria-label="Мана">
@@ -1191,7 +1214,8 @@ function ResultOverlay({ match, onClose }: { match: CombatMatch; onClose: () => 
       </div>
     );
   }
-  const didWin = match.result.winner_id === "player";
+  const didWin =
+    match.viewer_id != null && match.result.winner_id === match.viewer_id;
   return (
     <div className="result-backdrop" onClick={onClose}>
       <section className="result-panel" onClick={(event) => event.stopPropagation()}>

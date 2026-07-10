@@ -79,9 +79,17 @@ export type CombatEvent = {
   sequence: number | null;
   micro_step: number | null;
   snapshot: {
-    players?: CombatMatch["players"];
+    players?: CombatSnapshotPlayer[];
     units?: CombatUnit[];
   };
+};
+
+/** Player slice inside event snapshots: hero/mana state only — no hand/deck. */
+export type CombatSnapshotPlayer = {
+  id: string;
+  side: "top" | "bottom";
+  mana: number;
+  hero: { owner_id: string; side: "top" | "bottom"; hp: number };
 };
 
 export type CombatMatch = {
@@ -96,14 +104,20 @@ export type CombatMatch = {
   players: Array<{
     id: string;
     side: "top" | "bottom";
+    /** Team index; allies share a team, the enemy is any other team. */
+    team: number;
+    is_bot: boolean;
     mana: number;
     hero: { owner_id: string; side: "top" | "bottom"; hp: number };
+    /** Server-authoritative hand — populated only for the viewer's own seat. */
+    hand: string[];
+    hand_count: number;
+    /** Cards left in the deck; order and contents are a server-side secret. */
+    deck_count: number;
   }>;
+  /** Which seat this payload was serialized for (the client's own player). */
+  viewer_id: string | null;
   units: CombatUnit[];
-  /** Cards currently in the player's hand (server-authoritative). */
-  player_hand: string[];
-  /** Cards left in the deck; the order is a server-side secret. */
-  deck_count: number;
   log: Array<{ message: string }>;
   events: CombatEvent[];
   result: {

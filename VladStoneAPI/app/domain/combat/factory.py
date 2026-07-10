@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from app.domain.combat.board import add_turn_mana
+from app.domain.combat.board import add_turn_mana, side_for_team
 from app.domain.combat.cards import BRUISER_CARD, RANGER_CARD
 from app.domain.combat.constants import RULESET_VERSION
 from app.domain.combat.deck import init_player_deck
@@ -38,19 +38,29 @@ def create_unit(
     )
 
 
+def create_participant(
+    *,
+    player_id: str,
+    team: int,
+    is_bot: bool = False,
+    user_id: int | None = None,
+    mana: int = 0,
+) -> PlayerState:
+    side = side_for_team(team)
+    return PlayerState(
+        id=player_id,
+        side=side,
+        team=team,
+        is_bot=is_bot,
+        user_id=user_id,
+        mana=mana,
+        hero=HeroState(owner_id=player_id, side=side),
+    )
+
+
 def create_demo_match() -> MatchState:
-    top_player = PlayerState(
-        id="player_top",
-        side=PlayerSide.TOP,
-        mana=2,
-        hero=HeroState(owner_id="player_top", side=PlayerSide.TOP),
-    )
-    bottom_player = PlayerState(
-        id="player_bottom",
-        side=PlayerSide.BOTTOM,
-        mana=2,
-        hero=HeroState(owner_id="player_bottom", side=PlayerSide.BOTTOM),
-    )
+    top_player = create_participant(player_id="player_top", team=1, mana=2)
+    bottom_player = create_participant(player_id="player_bottom", team=0, mana=2)
     return MatchState(
         id="demo",
         ruleset_version=RULESET_VERSION,
@@ -74,23 +84,31 @@ def create_demo_match() -> MatchState:
     )
 
 
-def create_player_match(*, now: datetime | None = None) -> MatchState:
-    player = PlayerState(
-        id="player",
-        side=PlayerSide.BOTTOM,
+def create_player_match(
+    *,
+    user_id: int | None = None,
+    now: datetime | None = None,
+) -> MatchState:
+    # Seat ids are neutral on purpose: nothing may key logic off "player"/"bot"
+    # (R12) — participants are found by is_bot / user_id / team instead.
+    human = create_participant(
+        player_id="p1",
+        team=0,
+        user_id=user_id,
         mana=add_turn_mana(0, 1),
-        hero=HeroState(owner_id="player", side=PlayerSide.BOTTOM),
     )
-    bot = PlayerState(
-        id="bot",
-        side=PlayerSide.TOP,
+    bot = create_participant(
+        player_id="p2",
+        team=1,
+        is_bot=True,
         mana=add_turn_mana(0, 1),
-        hero=HeroState(owner_id="bot", side=PlayerSide.TOP),
     )
     match = MatchState(
         id=f"local_pve_{uuid4().hex}",
         ruleset_version=RULESET_VERSION,
-        players=[bot, player],
+        players=[bot, human],
     )
-    init_player_deck(match)
+    # The scripted test bot plays a fixed pattern, not a deck; real bot decks
+    # arrive with the v4 engine.
+    init_player_deck(human)
     return start_planning_timer(match, now=now)

@@ -9,7 +9,8 @@ from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
 from app.domain.catalog import starter_catalog_payload
 from app.domain.combat.deck import covers_hand
-from app.domain.combat.models import MatchLifecycleStatus, MatchState, PlayerSide, Position
+from app.domain.combat.helpers import human_players
+from app.domain.combat.models import MatchLifecycleStatus, MatchState, Position
 from app.domain.combat.rules import (
     apply_placements,
     apply_simple_bot_turn,
@@ -62,7 +63,7 @@ def start_combat(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
-    match = create_player_match()
+    match = create_player_match(user_id=user.id if user else None)
     create_combat_match_record(db, match=match, owner_user_id=user.id if user else None)
     audit(
         db,
@@ -181,9 +182,12 @@ async def resolve_combat_turn(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Combat turn is no longer current",
             )
+        # PvE: placements always belong to the match's single human seat.
+        # PvP (later phase) will map the authenticated user to their seat here.
+        acting_player = human_players(match)[0]
         # The hand is server-authoritative: every placement must reference a card
         # that is actually in the player's hand this turn.
-        if not covers_hand(match, [p.card_id for p in payload.placements]):
+        if not covers_hand(acting_player, [p.card_id for p in payload.placements]):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Placement uses a card that is not in hand",
@@ -197,8 +201,7 @@ async def resolve_combat_turn(
         match = apply_placements(
             match,
             placements,
-            owner_id="player",
-            side=PlayerSide.BOTTOM,
+            owner_id=acting_player.id,
             from_hand=True,
         )
         match = apply_simple_bot_turn(match)
@@ -358,8 +361,12 @@ def _match_snapshot(match: MatchState) -> dict:
             {
                 "id": player.id,
                 "side": player.side,
+                "team": player.team,
+                "is_bot": player.is_bot,
                 "mana": player.mana,
                 "hero_hp": player.hero.hp,
+                "hand_count": len(player.hand),
+                "deck_count": len(player.deck),
             }
             for player in match.players
         ],

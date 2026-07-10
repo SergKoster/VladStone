@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from app.domain.combat.cards import DECK_CARD_IDS
+from app.domain.combat.helpers import bot_players, human_players
 from app.domain.combat.models import (
     ActionPriority,
     CardDefinition,
@@ -80,33 +81,51 @@ def legacy_demo_match():
     return match
 
 
+def test_participants_have_teams_and_per_player_decks() -> None:
+    match = create_player_match(user_id=42)
+    human = human_players(match)[0]
+    bot = bot_players(match)[0]
+
+    # R12: seats are found by role, sides derive from teams, no magic ids.
+    assert human.team != bot.team
+    assert human.side != bot.side
+    assert human.user_id == 42
+    assert bot.user_id is None
+    # The scripted bot plays a fixed pattern — no deck to leak or draw from.
+    assert bot.deck == [] and bot.hand == []
+
+
 def test_deck_cycle_deals_hand_draws_and_reshuffles() -> None:
     match = create_player_match()
+    human = human_players(match)[0]
 
     # Full test deck: every catalog card exactly once, split hand/deck.
-    assert len(match.player_hand) == 3
-    assert len(match.player_deck) == len(DECK_CARD_IDS) - 3
-    assert sorted(match.player_hand + match.player_deck) == sorted(DECK_CARD_IDS)
+    assert len(human.hand) == 3
+    assert len(human.deck) == len(DECK_CARD_IDS) - 3
+    assert sorted(human.hand + human.deck) == sorted(DECK_CARD_IDS)
 
     # Each resolved turn draws exactly one card into the hand.
     resolved = resolve_turn(match)
-    assert len(resolved.player_hand) == 4
-    assert len(resolved.player_deck) == len(DECK_CARD_IDS) - 4
+    resolved_human = human_players(resolved)[0]
+    assert len(resolved_human.hand) == 4
+    assert len(resolved_human.deck) == len(DECK_CARD_IDS) - 4
+    # The bot draws nothing: its pattern is not a deck.
+    assert bot_players(resolved)[0].hand == []
 
     # When the deck runs out, a fresh shuffled deck is built from the cards
     # that are not in hand, and drawing continues.
-    resolved.player_deck = []
-    resolved.player_hand = ["banka", "test_ranger"]
-    redrawn = resolve_turn(resolved)
-    assert len(redrawn.player_hand) == 3
-    assert len(redrawn.player_deck) == len(DECK_CARD_IDS) - 3
-    assert sorted(redrawn.player_hand + redrawn.player_deck) == sorted(DECK_CARD_IDS)
+    resolved_human.deck = []
+    resolved_human.hand = ["banka", "test_ranger"]
+    redrawn_human = human_players(resolve_turn(resolved))[0]
+    assert len(redrawn_human.hand) == 3
+    assert len(redrawn_human.deck) == len(DECK_CARD_IDS) - 3
+    assert sorted(redrawn_human.hand + redrawn_human.deck) == sorted(DECK_CARD_IDS)
 
 
 def test_placements_from_hand_consume_only_played_cards() -> None:
     match = create_player_match()
-    match.player_hand = ["banka", "zadanie", "test_ranger"]
-    player = next(candidate for candidate in match.players if candidate.id == "player")
+    player = human_players(match)[0]
+    player.hand = ["banka", "zadanie", "test_ranger"]
     # Exactly enough mana for one card: the second placement must be skipped.
     player.mana = 1
 
@@ -119,36 +138,35 @@ def test_placements_from_hand_consume_only_played_cards() -> None:
             # Not in hand: skipped.
             ("test_bruiser", Position(row=4, col=2)),
         ],
-        owner_id="player",
-        side=PlayerSide.BOTTOM,
+        owner_id=player.id,
         from_hand=True,
     )
 
-    assert updated.player_hand == ["zadanie", "test_ranger"]
+    assert human_players(updated)[0].hand == ["zadanie", "test_ranger"]
     assert [unit.card_id for unit in updated.units] == ["banka"]
 
 
 def test_bot_alternates_bruiser_lane_0_and_ranger_lane_1() -> None:
     match = create_player_match()
-    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+    bot = bot_players(match)[0]
 
     # Not enough mana for the bruiser yet: the bot saves up instead of skipping
     # ahead in its pattern. (Forced to 0 so the check holds for any card cost.)
     bot.mana = 0
     skipped = apply_simple_bot_turn(match)
-    assert not [unit for unit in skipped.units if unit.owner_id == "bot"]
-    assert skipped.bot_spawn_count == 0
+    assert not [unit for unit in skipped.units if unit.owner_id == bot.id]
+    assert bot_players(skipped)[0].bot_spawn_count == 0
 
     bot.mana = 10
     first = apply_simple_bot_turn(match)  # spawn 1: bruiser to lane 0
-    assert [(u.card_id, u.position.col) for u in first.units if u.owner_id == "bot"] == [
+    assert [(u.card_id, u.position.col) for u in first.units if u.owner_id == bot.id] == [
         ("test_bruiser", 0)
     ]
 
     second = apply_simple_bot_turn(first)  # spawn 2: ranger to lane 1
-    bot_units = [(u.card_id, u.position.col) for u in second.units if u.owner_id == "bot"]
+    bot_units = [(u.card_id, u.position.col) for u in second.units if u.owner_id == bot.id]
     assert ("test_ranger", 1) in bot_units
-    assert second.bot_spawn_count == 2
+    assert bot_players(second)[0].bot_spawn_count == 2
 
 
 def test_mana_schedule_and_cap() -> None:
@@ -297,8 +315,8 @@ def test_second_same_cell_collision_without_attacks_only_consumes_steps() -> Non
 
 def test_player_can_spawn_on_enemy_in_spawn_row_and_push_it_back() -> None:
     match = create_player_match()
-    player = next(candidate for candidate in match.players if candidate.id == "player")
-    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+    player = human_players(match)[0]
+    bot = bot_players(match)[0]
     # Exactly the card's cost, so the spawn drains the mana to zero below.
     player.mana = 1
     enemy = create_unit(
@@ -314,14 +332,13 @@ def test_player_can_spawn_on_enemy_in_spawn_row_and_push_it_back() -> None:
         match,
         [("test_bruiser", Position(row=4, col=1))],
         owner_id=player.id,
-        side=player.side,
     )
 
     pushed = next(unit for unit in updated.units if unit.id == "enemy_at_spawn")
     spawned = next(unit for unit in updated.units if unit.owner_id == player.id)
     assert pushed.position == Position(row=3, col=1)
     assert spawned.position == Position(row=4, col=1)
-    assert next(candidate for candidate in updated.players if candidate.id == "player").mana == 0
+    assert human_players(updated)[0].mana == 0
     assert any("was pushed" in entry.message for entry in updated.log)
     push_event = next(event for event in updated.events if event.type == CombatEventType.PUSH)
     assert push_event.actor_id == "enemy_at_spawn"
@@ -477,8 +494,8 @@ def test_death_event_contains_replay_fields() -> None:
 
 def test_hero_hit_and_match_finished_events_contain_replay_fields() -> None:
     match = create_player_match()
-    player = next(candidate for candidate in match.players if candidate.id == "player")
-    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+    player = human_players(match)[0]
+    bot = bot_players(match)[0]
     player.hero.hp = 1
     match.units = [
         create_unit(
@@ -494,25 +511,25 @@ def test_hero_hit_and_match_finished_events_contain_replay_fields() -> None:
 
     hero_hit = next(event for event in resolved.events if event.type == CombatEventType.HERO_HIT)
     assert hero_hit.actor_id == "bot_ranger_at_hero"
-    assert hero_hit.target_id == "player"
+    assert hero_hit.target_id == player.id
     assert hero_hit.damage == 1
     assert hero_hit.before_hp == 1
     assert hero_hit.after_hp == 0
     finished = next(
         event for event in resolved.events if event.type == CombatEventType.MATCH_FINISHED
     )
-    assert finished.target_id == "bot"
+    assert finished.target_id == bot.id
     assert finished.sequence == len(resolved.events)
 
 
 def test_resolve_survives_multiple_turns_with_bot_and_player_placements() -> None:
     match = create_player_match()
+    human_id = human_players(match)[0].id
     for turn_index in range(6):
         match = apply_placements(
             match,
             [("test_ranger", Position(row=4, col=turn_index % 3))],
-            owner_id="player",
-            side=PlayerSide.BOTTOM,
+            owner_id=human_id,
         )
         match = apply_simple_bot_turn(match)
         match = resolve_turn(match)
@@ -523,7 +540,7 @@ def test_resolve_survives_multiple_turns_with_bot_and_player_placements() -> Non
 
 def test_unit_at_enemy_edge_without_attacks_does_not_crash() -> None:
     match = create_player_match()
-    player = next(candidate for candidate in match.players if candidate.id == "player")
+    player = human_players(match)[0]
     match.turn = 5
     player.mana = 2
     match.units = [
@@ -545,8 +562,8 @@ def test_unit_at_enemy_edge_without_attacks_does_not_crash() -> None:
 
 def test_match_finishes_when_player_hero_reaches_zero_hp() -> None:
     match = create_player_match()
-    player = next(candidate for candidate in match.players if candidate.id == "player")
-    bot = next(candidate for candidate in match.players if candidate.id == "bot")
+    player = human_players(match)[0]
+    bot = bot_players(match)[0]
     player.hero.hp = 1
     match.units = [
         create_unit(
@@ -562,10 +579,11 @@ def test_match_finishes_when_player_hero_reaches_zero_hp() -> None:
     repeated = resolve_turn(resolved)
 
     assert resolved.result.status == "finished"
-    assert resolved.result.winner_id == "bot"
+    assert resolved.result.winner_id == bot.id
+    assert resolved.result.winner_team == bot.team
     assert resolved.result.reward_coins == 1
     assert player.hero.hp == 1
-    resolved_player = next(candidate for candidate in resolved.players if candidate.id == "player")
+    resolved_player = human_players(resolved)[0]
     assert resolved_player.hero.hp == 0
     assert repeated.result.status == "finished"
     assert any(event.type == CombatEventType.MATCH_FINISHED for event in resolved.events)

@@ -94,8 +94,22 @@ class HeroState(BaseModel):
 class PlayerState(BaseModel):
     id: str
     side: PlayerSide
+    # Team index (R12): 1v1, co-op boss and 2v2 are all configurations of the
+    # same model. The board side is derived from the team at match creation
+    # (side_for_team); allies share a side.
+    team: int = Field(default=0, ge=0)
+    is_bot: bool = False
+    # Account behind this seat; None for bots and anonymous dev matches.
+    user_id: int | None = None
     mana: int = Field(default=0, ge=0)
     hero: HeroState
+    # Per-player deck cycle. Deck order AND contents are server-side secrets:
+    # the API layer exposes only deck_count, and a hand only to its owner.
+    deck: list[str] = Field(default_factory=list)
+    hand: list[str] = Field(default_factory=list)
+    # Scripted test-bot memory: how many units it has spawned, drives its
+    # alternating pattern. Meaningless (and 0) for humans.
+    bot_spawn_count: int = Field(default=0, ge=0)
 
 
 class CombatLogEntry(BaseModel):
@@ -120,7 +134,11 @@ class CombatEvent(BaseModel):
 
 class MatchResult(BaseModel):
     status: str = "active"
+    # Sole player of the winning team when it has exactly one member (1v1);
+    # None for draws and (future) multi-player teams — winner_team is then
+    # the authoritative field.
     winner_id: str | None = None
+    winner_team: int | None = None
     reward_coins: int = 0
 
 
@@ -140,13 +158,6 @@ class MatchState(BaseModel):
     planning_deadline: datetime | None = None
     players: list[PlayerState]
     units: list[UnitState] = Field(default_factory=list)
-    # Human player's deck cycle (MVP: single human player; PvP will move this
-    # into per-player state). Deck order is server-side secret — the API layer
-    # exposes only its size, never its order.
-    player_deck: list[str] = Field(default_factory=list)
-    player_hand: list[str] = Field(default_factory=list)
-    # How many units the test bot has spawned; drives its alternating pattern.
-    bot_spawn_count: int = Field(default=0, ge=0)
     log: list[CombatLogEntry] = Field(default_factory=list)
     events: list[CombatEvent] = Field(default_factory=list)
     result: MatchResult = Field(default_factory=MatchResult)
