@@ -50,6 +50,7 @@ from app.domain.combat.engine.tags import (
     TAG_TOWER,
 )
 from app.domain.combat.engine.targeting import TargetSelector, TargetSide
+from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import (
     UnitBlueprint,
     UnitState,
@@ -119,6 +120,7 @@ __all__ = [
     "select_targets",
     "spawn_unit",
     "tick_statuses",
+    "translate_engine_events",
     "unit_tags",
     "validate_blueprint",
     "validate_card",

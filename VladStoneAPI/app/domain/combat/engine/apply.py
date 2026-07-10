@@ -51,12 +51,13 @@ HAND_CAP = 6
 
 
 class EngineEvent(BaseModel):
-    """Факт движка — сырьё для combat-событий клиента (P2.12)."""
+    """Факт движка — сырьё для combat-событий клиента (P2.12, translate.py)."""
 
     kind: Literal[
         "damage",
         "heal",
         "status_applied",
+        "status_expired",
         "stance_changed",
         "tag_granted",
         "pushed",
@@ -72,19 +73,25 @@ class EngineEvent(BaseModel):
         "moved",
         "collision",
         "unit_died",
+        "ability_triggered",
     ]
     unit_id: str | None = None
     # Второй участник факта: цель атаки/коллизии.
     target_id: str | None = None
     player_id: str | None = None
+    # Числовые before/after — всегда про ВЕЛИЧИНУ (HP, мана), не координаты.
     amount: int | None = None
     before: int | None = None
     after: int | None = None
     status_id: str | None = None
     stance: Stance | None = None
     tag: str | None = None
-    row: int | None = None
-    col: int | None = None
+    # Хук, породивший факт (ability_triggered).
+    trigger: str | None = None
+    # Клетки «откуда/куда»: атака — клетка актора → клетка цели; движение/
+    # толчок — путь юнита; спавн — to_cell; смерть — from_cell.
+    from_cell: tuple[int, int] | None = None
+    to_cell: tuple[int, int] | None = None
     card_id: str | None = None
     # Проставляются резолвером: фаза хода и номер итерации внутри фазы 4.
     phase: str | None = None
@@ -341,10 +348,8 @@ def _push(effect: Push, ctx: EffectContext, targets: list[UnitState]) -> list[En
             EngineEvent(
                 kind="pushed",
                 unit_id=unit.id,
-                before=before_row,
-                after=row,
-                row=row,
-                col=unit.col,
+                from_cell=(before_row, unit.col),
+                to_cell=(row, unit.col),
             )
         )
     return events
@@ -389,7 +394,7 @@ def _spawn_token(
     row, col = cell
     if not (0 <= row < ctx.rows and 0 <= col < ctx.cols) or ctx.unit_at(row, col) is not None:
         # I5: клетка занята/вне поля — эффект детерминированно фейлится.
-        return [EngineEvent(kind="fizzled", card_id=effect.card_id, row=row, col=col)]
+        return [EngineEvent(kind="fizzled", card_id=effect.card_id, to_cell=(row, col))]
     assert card.blueprint_id is not None  # гарантировано валидатором карты
     blueprint = ctx.blueprints[card.blueprint_id]
     owner = ctx.player_by_id(caster_id)
@@ -409,8 +414,7 @@ def _spawn_token(
             unit_id=token.id,
             player_id=owner.id,
             card_id=card.id,
-            row=row,
-            col=col,
+            to_cell=(row, col),
         )
     ]
 

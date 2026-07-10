@@ -66,7 +66,20 @@ export type CombatEvent = {
     | "collision_step"
     | "death"
     | "hero_hit"
-    | "match_finished";
+    | "match_finished"
+    // События движка v4 (P2.12): до подмены движка сервер их не шлёт;
+    // проигрыватель обрабатывает неизвестные типы общим путём (снапшот+лог).
+    | "heal"
+    | "spell_cast"
+    | "stance_changed"
+    | "status_applied"
+    | "status_expired"
+    | "ability_triggered"
+    | "tag_granted"
+    | "executed"
+    | "card_drawn"
+    | "mana_changed"
+    | "fizzled";
   message: string;
   actor_id: string | null;
   target_id: string | null;
@@ -78,6 +91,8 @@ export type CombatEvent = {
   after_hp: number | null;
   sequence: number | null;
   micro_step: number | null;
+  /** Фаза хода v4 (spells/spawn/iterations/end/draw); у MVP-событий null. */
+  phase?: string | null;
   snapshot: {
     players?: CombatSnapshotPlayer[];
     units?: CombatUnit[];

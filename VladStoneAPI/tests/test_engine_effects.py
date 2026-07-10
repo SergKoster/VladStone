@@ -246,7 +246,8 @@ def test_push_moves_forward_by_target_side_and_stops_at_obstacles() -> None:
     events = apply_effect(Push(cells=3), ctx, caster_id="p1", targets=[mine])
     # 3 клетки вперёд, но на ряду 1 стоит юнит: доехал до ряда 2 и встал.
     assert mine.row == 2
-    assert events[0].kind == "pushed" and events[0].before == 3 and events[0].after == 2
+    assert events[0].kind == "pushed"
+    assert events[0].from_cell == (3, 1) and events[0].to_cell == (2, 1)
 
     # Заблокирован вплотную — эффект детерминированно фейлится.
     fizzle = apply_effect(Push(), ctx, caster_id="p1", targets=[mine])

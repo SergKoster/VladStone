@@ -221,7 +221,7 @@ def test_spawn_pays_mana_consumes_card_and_respects_zone() -> None:
     )
     spawned = [event for event in events if event.kind == "spawned"]
     fizzled = [event for event in events if event.kind == "fizzled"]
-    assert len(spawned) == 1 and spawned[0].row == 4
+    assert len(spawned) == 1 and spawned[0].to_cell == (4, 1)
     assert len(fizzled) == 1 and fizzled[0].card_id == "uc2"
     assert p1.mana == 10 - 3 and "uc" not in p1.hand
 
@@ -277,7 +277,7 @@ def test_spawn_push_chain_of_allies_and_single_enemy() -> None:
         turn=1,
     )
     pushes = [event for event in events if event.kind == "pushed"]
-    assert pushes and pushes[0].unit_id == intruder.id and pushes[0].after == 3
+    assert pushes and pushes[0].unit_id == intruder.id and pushes[0].to_cell == (3, 2)
 
 
 def test_on_spawn_ability_fires_and_e1_mini_wave_collects_deaths() -> None:
@@ -347,7 +347,7 @@ def test_collision_only_into_an_empty_cell_trades_damage() -> None:
     theirs = add_unit(ctx, uid="theirs", owner="p2", row=1, col=1, bp="pacifist")
     events = resolve(ctx, turn=1)
     collisions = [event for event in events if event.kind == "collision"]
-    assert len(collisions) == 1 and collisions[0].row == 2
+    assert len(collisions) == 1 and collisions[0].to_cell == (2, 1)
     # Размен ударами, оба остались на местах.
     assert mine.current_hp == 3 and theirs.current_hp == 3
     assert (mine.row, theirs.row) == (3, 1)

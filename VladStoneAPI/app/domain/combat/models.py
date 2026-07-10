@@ -35,6 +35,18 @@ class CombatEventType(StrEnum):
     DEATH = "death"
     HERO_HIT = "hero_hit"
     MATCH_FINISHED = "match_finished"
+    # События движка v4 (P2.12); до подмены движка MVP их не эмитит.
+    HEAL = "heal"
+    SPELL_CAST = "spell_cast"
+    STANCE_CHANGED = "stance_changed"
+    STATUS_APPLIED = "status_applied"
+    STATUS_EXPIRED = "status_expired"
+    ABILITY_TRIGGERED = "ability_triggered"
+    TAG_GRANTED = "tag_granted"
+    EXECUTED = "executed"
+    CARD_DRAWN = "card_drawn"
+    MANA_CHANGED = "mana_changed"
+    FIZZLED = "fizzled"
 
 
 class CombatTargetKind(StrEnum):
@@ -129,6 +141,9 @@ class CombatEvent(BaseModel):
     after_hp: int | None = None
     sequence: int | None = None
     micro_step: int | None = None
+    # Фаза хода v4 («spells»/«spawn»/«iterations»/«end»/«draw») — для подписей
+    # оверлея итераций (§18.3); у MVP-событий отсутствует.
+    phase: str | None = None
     snapshot: dict = Field(default_factory=dict)
 
 

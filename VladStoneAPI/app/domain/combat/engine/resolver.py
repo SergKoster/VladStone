@@ -186,19 +186,39 @@ def _spawn_from_hand(ctx: EffectContext, player: PlayerState, intent: SpawnInten
             unit_id=unit.id,
             player_id=player.id,
             card_id=card.id,
-            row=unit.row,
-            col=unit.col,
+            to_cell=(unit.row, unit.col),
         )
     ]
     # Эффекты «при спавне» — сразу; их смерти соберёт мини-волна фазы (E1).
+    events += _fire_abilities(ctx, unit, TriggerHook.ON_SPAWN)
+    return events
+
+
+def _fire_abilities(ctx: EffectContext, unit: UnitState, trigger: TriggerHook):
+    """Отыграть способности юнита на хуке; факт ability_triggered — перед
+    эффектами, чтобы клиент мог подсветить источник до последствий."""
+    blueprint = ctx.blueprint_of(unit)
+    events: list[EngineEvent] = []
     for ability in blueprint.abilities:
-        if ability.trigger != TriggerHook.ON_SPAWN:
+        if ability.trigger != trigger:
             continue
+        events.append(
+            EngineEvent(
+                kind="ability_triggered",
+                unit_id=unit.id,
+                trigger=trigger.value,
+                from_cell=(unit.row, unit.col),
+            )
+        )
         targets = select_targets(
             ability.target, ctx, caster_side=unit.side, origin=(unit.row, unit.col)
         )
         events += apply_effect(
-            ability.effect, ctx, caster_id=player.id, targets=targets, cell=(unit.row, unit.col)
+            ability.effect,
+            ctx,
+            caster_id=unit.owner_id,
+            targets=targets,
+            cell=(unit.row, unit.col),
         )
     return events
 
@@ -222,7 +242,12 @@ def _resolve_spawn_push(
             return None
         occupant.row = behind_row
         return [
-            EngineEvent(kind="pushed", unit_id=occupant.id, before=row, after=behind_row, col=col)
+            EngineEvent(
+                kind="pushed",
+                unit_id=occupant.id,
+                from_cell=(row, col),
+                to_cell=(behind_row, col),
+            )
         ]
     # Цепочка своих: от спавн-клетки вперёд до первой пустой.
     chain: list[UnitState] = []
@@ -243,7 +268,12 @@ def _resolve_spawn_push(
         before = unit.row
         unit.row += forward
         events.append(
-            EngineEvent(kind="pushed", unit_id=unit.id, before=before, after=unit.row, col=col)
+            EngineEvent(
+                kind="pushed",
+                unit_id=unit.id,
+                from_cell=(before, col),
+                to_cell=(unit.row, col),
+            )
         )
     return events
 
@@ -308,6 +338,8 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
                 amount=ctx.blueprint_of(attacker).stats.damage,
                 before=before,
                 after=target.current_hp,
+                from_cell=(attacker.row, attacker.col),
+                to_cell=(target.row, target.col),
             )
         )
         acted = True
@@ -320,7 +352,10 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             unit.row, unit.col = cell
             events.append(
                 EngineEvent(
-                    kind="moved", unit_id=unit.id, before=before, after=unit.row, col=unit.col
+                    kind="moved",
+                    unit_id=unit.id,
+                    from_cell=(before, unit.col),
+                    to_cell=cell,
                 )
             )
             acted = True
@@ -336,8 +371,7 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
                 kind="collision",
                 unit_id=first.id,
                 target_id=second.id,
-                row=cell[0],
-                col=cell[1],
+                to_cell=cell,
             )
         )
         for unit, other in ((first, second), (second, first)):
@@ -409,24 +443,19 @@ def _end_of_turn_effects(ctx: EffectContext) -> list[EngineEvent]:
     # поля. Прочие хуки (on_turn_start/on_attack/on_damaged/on_stance_change)
     # подключаются, когда появится первая карта с ними.
     for unit in sorted(list(ctx.units), key=lambda u: (u.row, u.col)):
-        blueprint = ctx.blueprint_of(unit)
-        for ability in blueprint.abilities:
-            if ability.trigger != TriggerHook.ON_TURN_END:
-                continue
-            targets = select_targets(
-                ability.target, ctx, caster_side=unit.side, origin=(unit.row, unit.col)
-            )
-            events += apply_effect(
-                ability.effect,
-                ctx,
-                caster_id=unit.owner_id,
-                targets=targets,
-                cell=(unit.row, unit.col),
-            )
-    # 4) Тик разогрева (D4: +1 к ходам на поле) и ЕДИНЫЙ тик ttl статусов (I4).
+        events += _fire_abilities(ctx, unit, TriggerHook.ON_TURN_END)
+    # 4) Тик разогрева (D4: +1 к ходам на поле) и ЕДИНЫЙ тик ttl статусов (I4);
+    # истёкшие статусы оставляют факт — клиент гасит бейдж/подсветку.
     for unit in ctx.units:
         unit.turns_on_field += 1
+        before_ids = [status.id for status in unit.statuses]
         unit.statuses = tick_statuses(unit.statuses)
+        after_ids = {status.id for status in unit.statuses}
+        for status_id in before_ids:
+            if status_id not in after_ids:
+                events.append(
+                    EngineEvent(kind="status_expired", unit_id=unit.id, status_id=status_id)
+                )
     return events
 
 
@@ -478,25 +507,11 @@ def run_death_wave(ctx: EffectContext) -> list[EngineEvent]:
                 EngineEvent(
                     kind="unit_died",
                     unit_id=unit.id,
-                    row=unit.row,
-                    col=unit.col,
+                    from_cell=(unit.row, unit.col),
                     before=max(0, unit.current_hp),
                     after=0,
                 )
             )
         for unit in wave:
-            blueprint = ctx.blueprint_of(unit)
-            for ability in blueprint.abilities:
-                if ability.trigger != TriggerHook.ON_DEATH:
-                    continue
-                targets = select_targets(
-                    ability.target, ctx, caster_side=unit.side, origin=(unit.row, unit.col)
-                )
-                events += apply_effect(
-                    ability.effect,
-                    ctx,
-                    caster_id=unit.owner_id,
-                    targets=targets,
-                    cell=(unit.row, unit.col),
-                )
+            events += _fire_abilities(ctx, unit, TriggerHook.ON_DEATH)
     return events
