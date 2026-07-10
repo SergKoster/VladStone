@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.domain.combat.deck import draw_card
+from app.domain.combat.engine.abilities import SpellScript
 from app.domain.combat.engine.cards import CardDefinition, CardType
 from app.domain.combat.engine.effects import (
     ApplyStatus,
@@ -50,7 +51,7 @@ HAND_CAP = 6
 
 
 class EngineEvent(BaseModel):
-    """Факт применения примитива — сырьё для combat-событий клиента (P2.12)."""
+    """Факт движка — сырьё для combat-событий клиента (P2.12)."""
 
     kind: Literal[
         "damage",
@@ -64,8 +65,17 @@ class EngineEvent(BaseModel):
         "card_drawn",
         "mana_changed",
         "fizzled",
+        # Факты резолвера (P2.10):
+        "spell_cast",
+        "spawned",
+        "attack",
+        "moved",
+        "collision",
+        "unit_died",
     ]
     unit_id: str | None = None
+    # Второй участник факта: цель атаки/коллизии.
+    target_id: str | None = None
     player_id: str | None = None
     amount: int | None = None
     before: int | None = None
@@ -76,6 +86,9 @@ class EngineEvent(BaseModel):
     row: int | None = None
     col: int | None = None
     card_id: str | None = None
+    # Проставляются резолвером: фаза хода и номер итерации внутри фазы 4.
+    phase: str | None = None
+    iteration: int | None = None
 
 
 @dataclass
@@ -92,6 +105,7 @@ class EffectContext:
     players: list[PlayerState]
     blueprints: dict[str, UnitBlueprint]
     cards: dict[str, CardDefinition] = field(default_factory=dict)
+    spells: dict[str, SpellScript] = field(default_factory=dict)
     mana_cap: int = 10
     # Счётчик токенов матча — детерминированные id призванных юнитов.
     token_seq: int = 0
@@ -336,8 +350,8 @@ def _push(effect: Push, ctx: EffectContext, targets: list[UnitState]) -> list[En
 def _kill_if(effect: KillIf, targets: list[UnitState]) -> list[EngineEvent]:
     events = []
     for unit in targets:
-        if unit.current_hp <= 0:
-            continue  # уже обречён — граница под-фазы добьёт волной (C5)
+        if unit.doomed:
+            continue  # уже казнён — волна добьёт (C5)
         condition = True
         if effect.status_id is not None:
             status = next((s for s in unit.statuses if s.id == effect.status_id), None)
@@ -346,9 +360,13 @@ def _kill_if(effect: KillIf, targets: list[UnitState]) -> list[EngineEvent]:
             condition = unit.current_hp <= effect.max_hp
         if not condition:
             continue
-        before = unit.current_hp
-        unit.current_hp = 0  # смерть оформит волна на границе под-фазы (C5)
-        events.append(EngineEvent(kind="killed", unit_id=unit.id, before=before, after=0))
+        # Q5: казнь неотменяема — пометка «обречён», волна на границе под-фазы
+        # убивает помеченных независимо от HP; лечение не спасает (в отличие
+        # от урона, где вампиризм может вытащить из минуса — C3).
+        unit.doomed = True
+        events.append(
+            EngineEvent(kind="killed", unit_id=unit.id, before=unit.current_hp, after=0)
+        )
     return events
 
 

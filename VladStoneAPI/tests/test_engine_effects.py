@@ -273,9 +273,10 @@ def test_kill_if_reaper_executes_poisoned_of_both_sides() -> None:
     events = apply_effect(reaper, ctx, caster_id="p1", targets=targets)
 
     # Обе стороны (E2!), только Яд 2+: свой и чужой казнены, чистый и Яд 1 — нет.
+    # Q5: казнь = пометка «обречён» (не HP), волна убьёт независимо от хиллов.
     assert {event.unit_id for event in events} == {poisoned_mine.id, poisoned_theirs.id}
-    assert poisoned_mine.current_hp == 0 and poisoned_theirs.current_hp == 0
-    assert clean.current_hp > 0 and lightly.current_hp > 0
+    assert poisoned_mine.doomed and poisoned_theirs.doomed
+    assert not clean.doomed and not lightly.doomed
 
 
 def test_kill_if_requires_a_condition_and_checks_max_hp() -> None:

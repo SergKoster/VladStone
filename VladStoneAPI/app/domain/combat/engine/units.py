@@ -60,8 +60,15 @@ class UnitState(BaseModel):
     # значения легальны ВНУТРИ итерации (C3: HP живёт, смерть проверяется
     # только на границе итерации волной C5).
     current_hp: int
+    # Q5: казнённый (kill_if) умирает наверняка — волна смертей убивает
+    # помеченных независимо от HP, лечение не спасает.
+    doomed: bool = False
     # Ходов на поле, включая ход постановки (= 1 в ход спавна, D4).
     turns_on_field: int = Field(ge=1)
+    # Бюджеты действий на ход; резолвер сбрасывает их из статов чертежа в
+    # начале фазы итераций.
+    remaining_steps: int = Field(default=0, ge=0)
+    remaining_attacks: int = Field(default=0, ge=0)
     # Наложенная стойка — максимум одна: apply_forced_stance перезаписывает
     # предыдущую (Q2, решение владельца).
     statuses: list[Status] = Field(default_factory=list)

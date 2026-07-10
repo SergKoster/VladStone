@@ -32,7 +32,9 @@ from app.domain.combat.engine.effects import (
     Push,
     SpawnToken,
 )
+from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.patterns import CellOffset, CellPattern, SpawnZone
+from app.domain.combat.engine.resolver import resolve_turn_v4, run_death_wave
 from app.domain.combat.engine.stances import Stance, StancePhase, StanceProgram
 from app.domain.combat.engine.statuses import (
     STATUS_FORCED_STANCE,
@@ -86,10 +88,13 @@ __all__ = [
     "Heal",
     "KillIf",
     "ModifyMana",
+    "PlayerIntents",
     "Push",
+    "SpawnIntent",
     "SpawnToken",
     "SpawnZone",
     "SpellAction",
+    "SpellIntent",
     "SpellScript",
     "Stance",
     "StancePhase",
@@ -104,6 +109,8 @@ __all__ = [
     "apply_effect",
     "apply_forced_stance",
     "current_stance",
+    "resolve_turn_v4",
+    "run_death_wave",
     "select_targets",
     "spawn_unit",
     "tick_statuses",
