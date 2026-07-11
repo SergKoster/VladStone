@@ -363,7 +363,14 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             continue
         # Коллизия: двое в одну пустую клетку (C4 гарантирует, что это
         # единственный вид коллизии). Встречные — враги: размен ударами;
-        # оба остаются, шаг потрачен.
+        # оба остаются, шаг потрачен. При вертикальном движении претендентов
+        # больше двух не бывает — если будущая механика (диагонали?) это
+        # сломает, падаем громко, а не тихо теряем чей-то ход.
+        if len(claimants) != 2:
+            raise AssertionError(
+                f"Collision at {cell} has {len(claimants)} claimants; "
+                "the resolver only knows head-on pairs"
+            )
         first, second = sorted(claimants, key=lambda u: (u.row, u.col))
         for unit in (first, second):
             unit.remaining_steps -= 1

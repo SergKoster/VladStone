@@ -203,7 +203,7 @@ def apply_effect(
     if isinstance(effect, Heal):
         return _heal(effect, targets or [])
     if isinstance(effect, ApplyStatus):
-        return _apply_status(effect, targets or [])
+        return _apply_status(effect, ctx, targets or [])
     if isinstance(effect, ChangeStance):
         return _change_stance(effect, ctx, targets or [])
     if isinstance(effect, GrantTag):
@@ -211,7 +211,7 @@ def apply_effect(
     if isinstance(effect, Push):
         return _push(effect, ctx, targets or [])
     if isinstance(effect, KillIf):
-        return _kill_if(effect, targets or [])
+        return _kill_if(effect, ctx, targets or [])
     if isinstance(effect, SpawnToken):
         return _spawn_token(effect, ctx, caster_id=caster_id, cell=cell)
     if isinstance(effect, DrawCard):
@@ -263,9 +263,16 @@ def _heal(effect: Heal, targets: list[UnitState]) -> list[EngineEvent]:
     return events
 
 
-def _apply_status(effect: ApplyStatus, targets: list[UnitState]) -> list[EngineEvent]:
+def _apply_status(
+    effect: ApplyStatus, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
     events = []
     for unit in targets:
+        # F4-расширение: статусы эффектов не липнут к структурам — иначе яд
+        # обошёл бы иммунитет башен к урону заклинаний (тик яда бьёт напрямую).
+        # Карта, которой нужно травить башни, получит явный флаг при дизайне.
+        if TAG_STRUCTURE in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue
         existing = next((s for s in unit.statuses if s.id == effect.status_id), None)
         if existing is None:
             unit.statuses.append(
@@ -355,11 +362,17 @@ def _push(effect: Push, ctx: EffectContext, targets: list[UnitState]) -> list[En
     return events
 
 
-def _kill_if(effect: KillIf, targets: list[UnitState]) -> list[EngineEvent]:
+def _kill_if(
+    effect: KillIf, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
     events = []
     for unit in targets:
         if unit.doomed:
             continue  # уже казнён — волна добьёт (C5)
+        # F4-расширение: казнь не берёт структуры — иначе «Жнец» сносил бы
+        # башни (винкон) в обход иммунитета к урону заклинаний.
+        if TAG_STRUCTURE in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue
         condition = True
         if effect.status_id is not None:
             status = next((s for s in unit.statuses if s.id == effect.status_id), None)

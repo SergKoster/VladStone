@@ -184,6 +184,22 @@ def test_judgement_ladder() -> None:
     assert run_judgement({0: [5, 5, 8], 1: [5, 9]}) == 1
 
 
+def test_towers_are_immune_to_spell_statuses_and_executions() -> None:
+    # Дыры blindspot pass: яд тикает мимо F4, казнь сносит винкон — закрыты.
+    from app.domain.combat.engine import ApplyStatus, KillIf, apply_effect
+    from app.domain.combat.engine.statuses import STATUS_POISON
+
+    ctx = make_ctx()
+    tower = towers_of(ctx, "bot")[0]
+    poison = ApplyStatus(status_id=STATUS_POISON, stacks=5)
+    assert apply_effect(poison, ctx, caster_id="human", targets=[tower]) == []
+    assert tower.statuses == []  # яд не прилип — тик конца хода не тронет HP
+
+    execute = KillIf(max_hp=999)
+    assert apply_effect(execute, ctx, caster_id="human", targets=[tower]) == []
+    assert not tower.doomed  # казнь заклинанием башню не берёт (F4)
+
+
 def test_bot_does_not_waste_pointed_spells_on_towers() -> None:
     ctx = make_ctx()
     ctx.player_by_id("bot").hand = ["bolt_card"]
