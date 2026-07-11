@@ -97,31 +97,20 @@ def all_teams_eliminated(ctx: EffectContext) -> bool:
 
 
 def run_judgement(hp_by_team: dict[int, list[int]]) -> int | None:
-    """«Суд» S2 (эндшпиль вместо chip damage): исход мгновенно, итерациями.
+    """«Суд» S2 (эндшпиль вместо chip damage): исход мгновенно, лестницей §17.
 
-    (1) минимальный HP среди ВСЕХ уцелевших башен; (2) уничтожить ВСЕ башни
-    с этим HP у обеих команд; (3) у кого башен осталось меньше — проиграл;
-    поровну и башни есть — повторить; кончились у всех разом — ничья
-    (= поражение обоим, H4). Вход — HP живых башен по командам; выход —
-    команда-победитель или None (ничья). Чистая функция: тестируема и
-    независима от контекста.
+    Уточнение владельца (июль 2026, вместо отменённого «итеративного сноса
+    слабейших» — тот давал абсурд: 5 башен по 19 HP проигрывали одной с 20):
+    (1) у кого БОЛЬШЕ уцелевших башен — победил; (2) поровну — чья слабейшая
+    башня крепче (больше HP); (3) поровну — большая сумма HP всех башен;
+    (4) полное равенство — ничья (= поражение обоим, H4). Вход — HP живых
+    башен по командам; выход — команда-победитель или None (ничья).
+    Чистая функция: тестируема и независима от контекста.
     """
-    towers = {team: sorted(hps) for team, hps in hp_by_team.items()}
-    while True:
-        pool = [hp for hps in towers.values() for hp in hps]
-        if not pool:
-            return None  # снесли всё у всех разом — ничья
-        weakest = min(pool)
-        towers = {
-            team: [hp for hp in hps if hp != weakest] for team, hps in towers.items()
-        }
-        remaining = {team: len(hps) for team, hps in towers.items()}
-        alive = [team for team, count in remaining.items() if count > 0]
-        if not alive:
-            return None
-        if len(alive) == 1:
-            return alive[0]
-        counts = set(remaining.values())
-        if len(counts) > 1:
-            # Не поровну: проиграл тот, у кого меньше; победитель — с максимумом.
-            return max(remaining, key=lambda team: remaining[team])
+    def strength(hps: list[int]) -> tuple[int, int, int]:
+        return (len(hps), min(hps) if hps else 0, sum(hps))
+
+    scored = {team: strength(hps) for team, hps in hp_by_team.items()}
+    best = max(scored.values())
+    winners = [team for team, score in scored.items() if score == best]
+    return winners[0] if len(winners) == 1 else None
