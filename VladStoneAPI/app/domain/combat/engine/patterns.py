@@ -36,6 +36,49 @@ class CellPattern(BaseModel):
         unique = {(offset.forward, offset.col) for offset in offsets}
         return tuple(CellOffset(forward=fwd, col=col) for fwd, col in sorted(unique))
 
+    # --- Пресеты (§14.1): покрытия карт собираются из слов, не из перечней ---
+
+    @classmethod
+    def cross(cls, radius: int = 1) -> "CellPattern":
+        """«Крест»: по radius клеток вперёд/назад/влево/вправо."""
+        offsets = []
+        for step in range(1, radius + 1):
+            offsets += [
+                CellOffset(forward=step, col=0),
+                CellOffset(forward=-step, col=0),
+                CellOffset(forward=0, col=-step),
+                CellOffset(forward=0, col=step),
+            ]
+        return cls(offsets=tuple(offsets))
+
+    @classmethod
+    def ring(cls) -> "CellPattern":
+        """«Кольцо»: 8 клеток вокруг юнита."""
+        return cls(
+            offsets=tuple(
+                CellOffset(forward=fwd, col=col)
+                for fwd in (-1, 0, 1)
+                for col in (-1, 0, 1)
+                if (fwd, col) != (0, 0)
+            )
+        )
+
+    @classmethod
+    def square(cls, *, include_center: bool = False) -> "CellPattern":
+        """Квадрат 3×3; include_center — с клеткой самого юнита (взрыв Черепа)."""
+        offsets = list(cls.ring().offsets)
+        if include_center:
+            offsets.append(CellOffset(forward=0, col=0))
+        return cls(offsets=tuple(offsets))
+
+    @classmethod
+    def union(cls, *patterns: "CellPattern") -> "CellPattern":
+        """Объединение паттернов (Дальник в Защите = ring + cross(2))."""
+        merged: list[CellOffset] = []
+        for pattern in patterns:
+            merged += pattern.offsets
+        return cls(offsets=tuple(merged))
+
     def resolve(
         self,
         *,

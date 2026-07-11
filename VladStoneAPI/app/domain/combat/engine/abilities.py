@@ -24,6 +24,9 @@ class TriggerHook(StrEnum):
     ON_DEATH = "on_death"
     ON_TURN_END = "on_turn_end"
     ON_STANCE_CHANGE = "on_stance_change"
+    # Наблюдатель волны смертей (§14.1 Самурай): срабатывает за КАЖДУЮ смерть
+    # врага, стоявшего в текущем покрытии носителя.
+    ON_ENEMY_DEATH_IN_COVERAGE = "on_enemy_death_in_coverage"
 
 
 class Ability(BaseModel):

@@ -452,14 +452,23 @@ def test_c5_death_wave_cascades_through_on_death_bombs() -> None:
 # --- Фазы 5–7: яд, разогрев/ttl, добор и мана ---
 
 
-def test_poison_ticks_at_end_phase_and_kills_via_end_wave() -> None:
+def test_poison_ticks_one_damage_one_stack_and_kills_via_end_wave() -> None:
+    # Новый канон яда (§14.1): тик конца хода = −1 HP И −1 стак.
     ctx = make_ctx()
-    frail = add_unit(ctx, uid="frail", owner="p2", row=0, col=0, hp=2)
-    frail.statuses.append(Status(id=STATUS_POISON, stacks=2))
+    sturdy = add_unit(ctx, uid="sturdy", owner="p2", row=0, col=0, hp=5)
+    sturdy.statuses.append(Status(id=STATUS_POISON, stacks=2))
     events = resolve(ctx, turn=1)
     tick = next(event for event in events if event.kind == "damage")
-    assert tick.status_id == STATUS_POISON and tick.phase == "end"
-    death = next(event for event in events if event.kind == "unit_died")
+    assert tick.status_id == STATUS_POISON and tick.amount == 1 and tick.phase == "end"
+    assert sturdy.current_hp == 4
+    poison = next(s for s in sturdy.statuses if s.id == STATUS_POISON)
+    assert poison.stacks == 1  # Яд 2 = ещё один ход по 1 урона
+
+    ctx2 = make_ctx()
+    frail = add_unit(ctx2, uid="frail", owner="p2", row=0, col=0, hp=1)
+    frail.statuses.append(Status(id=STATUS_POISON, stacks=3))
+    events2 = resolve(ctx2, turn=1)
+    death = next(event for event in events2 if event.kind == "unit_died")
     assert death.unit_id == frail.id and death.phase == "end"
 
 

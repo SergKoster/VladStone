@@ -36,9 +36,19 @@ from app.domain.combat.engine.cards import CardType
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.patterns import forward_direction
 from app.domain.combat.engine.stances import Stance
-from app.domain.combat.engine.statuses import STATUS_POISON, tick_statuses
+from app.domain.combat.engine.statuses import (
+    QuestCondition,
+    StatusDecay,
+    status_spec,
+    tick_statuses,
+)
 from app.domain.combat.engine.tags import TAG_TOWER
-from app.domain.combat.engine.units import UnitState, current_stance, spawn_unit
+from app.domain.combat.engine.units import (
+    UnitState,
+    current_stance,
+    effective_stats,
+    spawn_unit,
+)
 from app.domain.combat.engine.validation import validate_state
 from app.domain.combat.models import PlayerSide, PlayerState
 
@@ -68,6 +78,14 @@ def resolve_turn_v4(
     # состояние падает у источника с именем контрольной точки (ARCH §5.1).
     validate_state(ctx, checkpoint="entry")
 
+    # Бюджеты действий обновляются В НАЧАЛЕ хода (не в фазе итераций!):
+    # временные бафы бюджета из спелл-фазы (Самурай) должны дожить до
+    # итераций, а не стираться сбросом.
+    for unit in ctx.units:
+        stats = effective_stats(unit, ctx.blueprint_of(unit))
+        unit.remaining_steps = stats.move_steps
+        unit.remaining_attacks = stats.attacks_per_turn
+
     # Фазы 1–2: заклинания с чередованием; волна после каждого игрока (C1).
     for player in order:
         entry = intents_by_player.get(player.id)
@@ -92,7 +110,9 @@ def resolve_turn_v4(
     events += _run_iterations(ctx)
 
     # Фазы 5–6: эффекты конца хода в фикс-порядке (D3), затем волна.
-    events += _stamp(_end_of_turn_effects(ctx), "end")
+    # Накопленные факты хода передаются внутрь: квест-условия (§14.1
+    # «Задание») проверяются по ним.
+    events += _stamp(_end_of_turn_effects(ctx, events), "end")
     events += _stamp(run_death_wave(ctx), "end")
     validate_state(ctx, checkpoint="end")
 
@@ -283,11 +303,8 @@ def _resolve_spawn_push(
 
 
 def _run_iterations(ctx: EffectContext) -> list[EngineEvent]:
-    for unit in ctx.units:
-        blueprint = ctx.blueprint_of(unit)
-        unit.remaining_steps = blueprint.stats.move_steps
-        unit.remaining_attacks = blueprint.stats.attacks_per_turn
-
+    # Бюджеты выданы в начале хода (см. resolve_turn_v4) и при спавне —
+    # здесь их не трогаем, чтобы не стереть временные бафы спелл-фазы.
     events: list[EngineEvent] = []
     for iteration in range(1, ctx.rows * ITERATION_SAFETY_FACTOR + 1):
         acted, iteration_events = _run_single_iteration(ctx)
@@ -329,14 +346,17 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
     acted = False
     for attacker, target in attack_intents:
         attacker.remaining_attacks -= 1
+        # Урон — только через effective_stats: стойко-зависимые статы и
+        # перманентные бафы (расширение №3) обязаны учитываться.
+        damage = effective_stats(attacker, ctx.blueprint_of(attacker)).damage
         before = target.current_hp
-        target.current_hp -= ctx.blueprint_of(attacker).stats.damage  # минус легален (C3)
+        target.current_hp -= damage  # минус легален (C3)
         events.append(
             EngineEvent(
                 kind="attack",
                 unit_id=attacker.id,
                 target_id=target.id,
-                amount=ctx.blueprint_of(attacker).stats.damage,
+                amount=damage,
                 before=before,
                 after=target.current_hp,
                 from_cell=(attacker.row, attacker.col),
@@ -383,7 +403,7 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             )
         )
         for unit, other in ((first, second), (second, first)):
-            damage = ctx.blueprint_of(other).stats.damage
+            damage = effective_stats(other, ctx.blueprint_of(other)).damage
             before = unit.current_hp
             unit.current_hp -= damage
             events.append(
@@ -439,26 +459,43 @@ def _pick_attack_target(ctx: EffectContext, unit: UnitState, stance: Stance) -> 
 # --- Фазы 5–7: конец хода, добор, мана ---
 
 
-def _end_of_turn_effects(ctx: EffectContext) -> list[EngineEvent]:
+def _end_of_turn_effects(ctx: EffectContext, turn_events: list[EngineEvent]) -> list[EngineEvent]:
     events: list[EngineEvent] = []
-    # 1) Яд: −stacks HP каждому носителю (порядок чтения поля).
+    # 1) Тики статусов по спекам (яд §14.1: −1 HP; будущие регены — tick_heal),
+    # порядок чтения поля.
     for unit in sorted(ctx.units, key=lambda u: (u.row, u.col)):
-        poison = next((s for s in unit.statuses if s.id == STATUS_POISON), None)
-        if poison is None:
-            continue
-        before = unit.current_hp
-        unit.current_hp -= poison.stacks
-        events.append(
-            EngineEvent(
-                kind="damage",
-                unit_id=unit.id,
-                amount=poison.stacks,
-                before=before,
-                after=unit.current_hp,
-                status_id=STATUS_POISON,
-            )
-        )
-    # 2) Слот отложенных заклинаний («добей, если 1 HP») — контента пока нет.
+        for status in list(unit.statuses):
+            spec = status_spec(status.id)
+            if spec.tick_damage:
+                before = unit.current_hp
+                unit.current_hp -= spec.tick_damage
+                events.append(
+                    EngineEvent(
+                        kind="damage",
+                        unit_id=unit.id,
+                        amount=spec.tick_damage,
+                        before=before,
+                        after=unit.current_hp,
+                        status_id=status.id,
+                    )
+                )
+            if spec.tick_heal:
+                before = unit.current_hp
+                unit.current_hp += spec.tick_heal
+                events.append(
+                    EngineEvent(
+                        kind="heal",
+                        unit_id=unit.id,
+                        amount=spec.tick_heal,
+                        before=before,
+                        after=unit.current_hp,
+                        status_id=status.id,
+                    )
+                )
+    # 2) Квесты (слот «отложенных», D3): условие проверяется по фактам хода;
+    # выполнил — награда и клеймо снимается; клеймо истекает этим ходом без
+    # выполнения — кара (§14.1 «Задание»).
+    events += _run_quests(ctx, turn_events + events)
     # 3) Способности «в конце хода» (I4: on_turn_end — фаза 5), порядок чтения
     # поля. Прочие хуки (on_turn_start/on_attack/on_damaged/on_stance_change)
     # подключаются, когда появится первая карта с ними.
@@ -477,6 +514,54 @@ def _end_of_turn_effects(ctx: EffectContext) -> list[EngineEvent]:
                     EngineEvent(kind="status_expired", unit_id=unit.id, status_id=status_id)
                 )
     return events
+
+
+def _run_quests(ctx: EffectContext, facts: list[EngineEvent]) -> list[EngineEvent]:
+    """Квест-статусы (§14.1): проверка условий по фактам хода в фазе 5.
+
+    Выполнил — награда (эффекты on_success на носителя) и клеймо снимается;
+    не выполнил и клеймо истекает этим ходом (ttl 1) — кара (on_fail).
+    """
+    events: list[EngineEvent] = []
+    for unit in sorted(list(ctx.units), key=lambda u: (u.row, u.col)):
+        for status in list(unit.statuses):
+            spec = status_spec(status.id)
+            if spec.quest is None:
+                continue
+            fulfilled = _quest_condition_met(spec.quest.condition, unit, facts)
+            expiring = spec.decay == StatusDecay.TTL and status.ttl == 1
+            if not fulfilled and not expiring:
+                continue  # клеймо ещё висит — проверим в следующем ходу
+            outcome = spec.quest.on_success if fulfilled else spec.quest.on_fail
+            events.append(
+                EngineEvent(
+                    kind="ability_triggered",
+                    unit_id=unit.id,
+                    trigger=f"quest:{status.id}:{'success' if fulfilled else 'fail'}",
+                    from_cell=(unit.row, unit.col),
+                )
+            )
+            for effect in outcome:
+                events += apply_effect(effect, ctx, caster_id=unit.owner_id, targets=[unit])
+            if fulfilled:
+                unit.statuses = [s for s in unit.statuses if s is not status]
+                events.append(
+                    EngineEvent(kind="status_expired", unit_id=unit.id, status_id=status.id)
+                )
+    return events
+
+
+def _quest_condition_met(
+    condition: QuestCondition, unit: UnitState, facts: list[EngineEvent]
+) -> bool:
+    if condition == QuestCondition.ATTACKED_UNIT_THAT_DIED_THIS_TURN:
+        # Только явные атаки (коллизии — не «атаковал»); цель умерла в этот ход.
+        died = {fact.unit_id for fact in facts if fact.kind == "unit_died"}
+        return any(
+            fact.kind == "attack" and fact.unit_id == unit.id and fact.target_id in died
+            for fact in facts
+        )
+    raise ValueError(f"Unknown quest condition {condition!r}")  # недостижимо при валидном enum
 
 
 def _draw_and_mana(
@@ -534,4 +619,29 @@ def run_death_wave(ctx: EffectContext) -> list[EngineEvent]:
             )
         for unit in wave:
             events += _fire_abilities(ctx, unit, TriggerHook.ON_DEATH)
+        # Наблюдатели смерти (§14.1 Самурай): за КАЖДУЮ смерть врага в текущем
+        # покрытии живого наблюдателя — его способность срабатывает. Порядок:
+        # умершие в порядке волны, наблюдатели — по чтению поля.
+        for dead in wave:
+            for observer in sorted(ctx.units, key=lambda u: (u.row, u.col)):
+                if observer.side == dead.side:
+                    continue
+                blueprint = ctx.blueprint_of(observer)
+                if all(
+                    ability.trigger != TriggerHook.ON_ENEMY_DEATH_IN_COVERAGE
+                    for ability in blueprint.abilities
+                ):
+                    continue
+                coverage = blueprint.coverage(current_stance(observer, blueprint)).resolve(
+                    row=observer.row,
+                    col=observer.col,
+                    side=observer.side,
+                    rows=ctx.rows,
+                    cols=ctx.cols,
+                )
+                if (dead.row, dead.col) not in coverage:
+                    continue
+                events += _fire_abilities(
+                    ctx, observer, TriggerHook.ON_ENEMY_DEATH_IN_COVERAGE
+                )
     return events

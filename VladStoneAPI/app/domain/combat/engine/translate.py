@@ -33,6 +33,8 @@ _KIND_TO_TYPE: dict[str, CombatEventType] = {
     "card_drawn": CombatEventType.CARD_DRAWN,
     "mana_changed": CombatEventType.MANA_CHANGED,
     "fizzled": CombatEventType.FIZZLED,
+    "stat_buffed": CombatEventType.STAT_BUFFED,
+    "budget_modified": CombatEventType.BUDGET_MODIFIED,
 }
 
 
@@ -74,7 +76,7 @@ _HP_KINDS = frozenset({"attack", "damage", "heal", "killed", "unit_died"})
 # Факты, где unit_id — «пострадавший», а не действующее лицо.
 _TARGET_UNIT_KINDS = frozenset(
     {"damage", "heal", "status_applied", "status_expired", "stance_changed", "tag_granted",
-     "killed"}
+     "killed", "stat_buffed", "budget_modified"}
 )
 
 
@@ -144,6 +146,10 @@ def _message(fact: EngineEvent) -> str:
             return f"{fact.player_id} mana {fact.before} -> {fact.after}"
         case "fizzled":
             return f"effect fizzled ({fact.card_id or fact.unit_id or fact.player_id})"
+        case "stat_buffed":
+            return f"{fact.unit_id} gained a permanent buff"
+        case "budget_modified":
+            return f"{fact.unit_id} action budget changed by {fact.amount}"
     raise ValueError(f"Engine fact kind {fact.kind!r} has no message")  # недостижимо
 
 

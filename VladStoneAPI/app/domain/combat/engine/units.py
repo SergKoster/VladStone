@@ -25,12 +25,38 @@ class UnitStats(BaseModel):
     move_steps: int = Field(ge=0)
 
 
+class StatsOverride(BaseModel):
+    """Стойко-зависимые статы (§14.1 Эпик Серёга: урон 5 в Защите / 3 в Атаке).
+
+    Частичный оверрайд поверх базовых статов чертежа; None = поле не меняется.
+    HP намеренно нет: смена стойки не должна дёргать максимум здоровья.
+    """
+
+    model_config = {"frozen": True}
+
+    damage: int | None = Field(default=None, ge=0)
+    attacks_per_turn: int | None = Field(default=None, ge=0)
+    move_steps: int | None = Field(default=None, ge=0)
+
+
+class StatBonus(BaseModel):
+    """Перманентные бафы юнита (buff_stats): копятся на UnitState."""
+
+    hp: int = Field(default=0, ge=0)
+    damage: int = Field(default=0, ge=0)
+    attacks_per_turn: int = Field(default=0, ge=0)
+    move_steps: int = Field(default=0, ge=0)
+
+
 class UnitBlueprint(BaseModel):
     model_config = {"frozen": True}
 
     id: str
     name: str
     stats: UnitStats
+    # Оверрайд статов в стойке Защита (базовые статы = стойка Атака);
+    # по аналогии с per-stance покрытиями (§10.4).
+    stats_defense: StatsOverride | None = None
     stance_program: StanceProgram
     # Покрытие зависит от стойки (§10.4): у снайпера в Защите зона шире.
     # Пустой паттерн легален — «не атакует» (Матеша).
@@ -74,6 +100,8 @@ class UnitState(BaseModel):
     # Наложенная стойка — максимум одна: apply_forced_stance перезаписывает
     # предыдущую (Q2, решение владельца).
     statuses: list[Status] = Field(default_factory=list)
+    # Перманентные бафы (buff_stats): учитываются в effective_stats.
+    permanent_bonuses: StatBonus = Field(default_factory=StatBonus)
     # Теги, выданные эффектами в бою (grant_tag) — поверх базовых тегов
     # чертежа; итог считает unit_tags().
     granted_tags: tuple[str, ...] = ()
@@ -93,7 +121,7 @@ def spawn_unit(
     row: int,
     col: int,
 ) -> UnitState:
-    return UnitState(
+    unit = UnitState(
         id=unit_id,
         blueprint_id=blueprint.id,
         owner_id=owner_id,
@@ -103,11 +131,42 @@ def spawn_unit(
         current_hp=blueprint.stats.hp,
         turns_on_field=1,
     )
+    # Бюджеты хода выдаются сразу: юнит действует уже в ход постановки (D4).
+    # Резолвер обновляет их в начале каждого следующего хода.
+    stats = effective_stats(unit, blueprint)
+    unit.remaining_steps = stats.move_steps
+    unit.remaining_attacks = stats.attacks_per_turn
+    return unit
 
 
 def unit_tags(unit: UnitState, blueprint: UnitBlueprint) -> frozenset[str]:
     """Итоговые теги юнита: базовые (чертёж) + выданные в бою (grant_tag)."""
     return frozenset(blueprint.tags) | frozenset(unit.granted_tags)
+
+
+def effective_stats(unit: UnitState, blueprint: UnitBlueprint) -> UnitStats:
+    """ЕДИНСТВЕННАЯ точка чтения статов юнита (ARCH §5.1, расширение №3).
+
+    База чертежа → оверрайд текущей стойки (stats_defense) → перманентные
+    бафы. Прямое чтение blueprint.stats в резолвере/эффектах — баг: оно
+    молча игнорирует стойку и бафы.
+    """
+    base = blueprint.stats
+    damage, attacks, steps = base.damage, base.attacks_per_turn, base.move_steps
+    if blueprint.stats_defense is not None and current_stance(unit, blueprint) == Stance.DEFENSE:
+        override = blueprint.stats_defense
+        damage = override.damage if override.damage is not None else damage
+        attacks = (
+            override.attacks_per_turn if override.attacks_per_turn is not None else attacks
+        )
+        steps = override.move_steps if override.move_steps is not None else steps
+    bonus = unit.permanent_bonuses
+    return UnitStats(
+        hp=base.hp + bonus.hp,
+        damage=damage + bonus.damage,
+        attacks_per_turn=attacks + bonus.attacks_per_turn,
+        move_steps=steps + bonus.move_steps,
+    )
 
 
 def current_stance(unit: UnitState, blueprint: UnitBlueprint) -> Stance:

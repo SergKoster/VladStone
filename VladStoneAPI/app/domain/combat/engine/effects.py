@@ -113,6 +113,59 @@ class SpawnToken(BaseModel):
     card_id: str
 
 
+class BuffStats(BaseModel):
+    """Перманентный бафф статов (§14.1 «Задание»: +3 HP и +1 атака навсегда).
+
+    Пишется в permanent_bonuses юнита и учитывается effective_stats;
+    HP-бафф поднимает и текущее здоровье (потолка нет, Q4).
+    """
+
+    model_config = {"frozen": True}
+
+    kind: Literal["buff_stats"] = "buff_stats"
+    hp: int = Field(default=0, ge=0)
+    damage: int = Field(default=0, ge=0)
+    attacks_per_turn: int = Field(default=0, ge=0)
+    move_steps: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _buffs_something(self) -> "BuffStats":
+        if not (self.hp or self.damage or self.attacks_per_turn or self.move_steps):
+            raise ValueError("buff_stats must buff at least one stat")
+        return self
+
+
+class ModifyBudget(BaseModel):
+    """Временная правка бюджета ТЕКУЩЕГО хода (Самурай: +1 шаг в этом ходу).
+
+    Правит remaining_steps/remaining_attacks; между ходами ничего не хранит.
+    Минус — легален («усталость»), бюджет клампится в ноль.
+    """
+
+    model_config = {"frozen": True}
+
+    kind: Literal["modify_budget"] = "modify_budget"
+    steps: int = 0
+    attacks: int = 0
+
+    @model_validator(mode="after")
+    def _modifies_something(self) -> "ModifyBudget":
+        if not (self.steps or self.attacks):
+            raise ValueError("modify_budget must change at least one budget")
+        return self
+
+
+class Execute(BaseModel):
+    """Безусловная казнь (кара «Задания»): помечает doomed, волна добьёт.
+
+    Как и kill_if — структуры не берёт (F4), лечение не спасает (Q5).
+    """
+
+    model_config = {"frozen": True}
+
+    kind: Literal["execute"] = "execute"
+
+
 class DrawCard(BaseModel):
     model_config = {"frozen": True}
 
@@ -146,6 +199,9 @@ Effect = Annotated[
     | GrantTag
     | Push
     | KillIf
+    | Execute
+    | BuffStats
+    | ModifyBudget
     | SpawnToken
     | DrawCard
     | ModifyMana,

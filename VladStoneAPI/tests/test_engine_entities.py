@@ -140,15 +140,26 @@ def test_status_registry_and_shapes_are_enforced() -> None:
         Status(id=STATUS_POISON, stance=Stance.ATTACK)  # лишний пейлоад
 
 
-def test_tick_decrements_ttl_and_keeps_permanent_statuses() -> None:
+def test_tick_decay_by_spec_ttl_stacks_and_permanent() -> None:
+    # Три способа затухания (StatusSpec): ttl (клеймо/стойка), стаки (яд —
+    # новый канон §14.1: −1 стак за ход), постоянный (вечная стойка).
     statuses = [
-        Status(id=STATUS_POISON, stacks=2, ttl=2),
-        Status(id=STATUS_FORCED_STANCE, stance=Stance.ATTACK),  # постоянный
+        Status(id=STATUS_POISON, stacks=2),  # decay=stacks: яд без ttl
+        Status(id=STATUS_FORCED_STANCE, stance=Stance.ATTACK, ttl=2),  # decay=ttl
     ]
     ticked = tick_statuses(statuses)
-    assert [(s.id, s.ttl) for s in ticked] == [(STATUS_POISON, 1), (STATUS_FORCED_STANCE, None)]
+    assert [(s.id, s.stacks, s.ttl) for s in ticked] == [
+        (STATUS_POISON, 1, None),
+        (STATUS_FORCED_STANCE, 1, 1),
+    ]
     ticked = tick_statuses(ticked)
-    assert [(s.id, s.ttl) for s in ticked] == [(STATUS_FORCED_STANCE, None)]
+    assert ticked == []  # яд кончился по стакам, стойка — по ttl
+
+    permanent = tick_statuses([Status(id=STATUS_FORCED_STANCE, stance=Stance.DEFENSE)])
+    assert len(permanent) == 1  # без ttl наложение вечно
+
+    with pytest.raises(ValidationError):
+        Status(id=STATUS_POISON, ttl=2)  # яд затухает по стакам, ttl запрещён
 
 
 # --- Паттерны: H7 (вперёд — от стороны, лево/право — абсолютны) ---

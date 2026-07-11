@@ -47,6 +47,8 @@ class CombatEventType(StrEnum):
     CARD_DRAWN = "card_drawn"
     MANA_CHANGED = "mana_changed"
     FIZZLED = "fizzled"
+    STAT_BUFFED = "stat_buffed"
+    BUDGET_MODIFIED = "budget_modified"
 
 
 class CombatTargetKind(StrEnum):

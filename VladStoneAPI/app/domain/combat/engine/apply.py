@@ -21,13 +21,16 @@ from app.domain.combat.engine.abilities import SpellScript
 from app.domain.combat.engine.cards import CardDefinition, CardType
 from app.domain.combat.engine.effects import (
     ApplyStatus,
+    BuffStats,
     ChangeStance,
     DealDamage,
     DrawCard,
     Effect,
+    Execute,
     GrantTag,
     Heal,
     KillIf,
+    ModifyBudget,
     ModifyMana,
     Push,
     SpawnToken,
@@ -66,6 +69,8 @@ class EngineEvent(BaseModel):
         "card_drawn",
         "mana_changed",
         "fizzled",
+        "stat_buffed",
+        "budget_modified",
         # Факты резолвера (P2.10):
         "spell_cast",
         "spawned",
@@ -155,7 +160,8 @@ def select_targets(
     else:
         if origin is None:
             raise ValueError(f"scope={selector.scope!r} requires an origin cell")
-        if selector.scope == "cell":
+        if selector.scope in ("cell", "self"):
+            # self — клетка носителя способности (origin и есть его клетка).
             cells = {origin}
         else:
             assert selector.pattern is not None  # гарантировано валидатором
@@ -212,6 +218,12 @@ def apply_effect(
         return _push(effect, ctx, targets or [])
     if isinstance(effect, KillIf):
         return _kill_if(effect, ctx, targets or [])
+    if isinstance(effect, Execute):
+        return _execute(ctx, targets or [])
+    if isinstance(effect, BuffStats):
+        return _buff_stats(effect, targets or [])
+    if isinstance(effect, ModifyBudget):
+        return _modify_budget(effect, targets or [])
     if isinstance(effect, SpawnToken):
         return _spawn_token(effect, ctx, caster_id=caster_id, cell=cell)
     if isinstance(effect, DrawCard):
@@ -387,6 +399,61 @@ def _kill_if(
         unit.doomed = True
         events.append(
             EngineEvent(kind="killed", unit_id=unit.id, before=unit.current_hp, after=0)
+        )
+    return events
+
+
+def _execute(ctx: EffectContext, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        if unit.doomed:
+            continue
+        # F4: казнь структуры не берёт — как и kill_if.
+        if TAG_STRUCTURE in unit_tags(unit, ctx.blueprint_of(unit)):
+            continue
+        unit.doomed = True  # Q5: неотменяемо, волна добьёт независимо от HP
+        events.append(
+            EngineEvent(kind="killed", unit_id=unit.id, before=unit.current_hp, after=0)
+        )
+    return events
+
+
+def _buff_stats(effect: BuffStats, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        bonus = unit.permanent_bonuses
+        unit.permanent_bonuses = bonus.model_copy(
+            update={
+                "hp": bonus.hp + effect.hp,
+                "damage": bonus.damage + effect.damage,
+                "attacks_per_turn": bonus.attacks_per_turn + effect.attacks_per_turn,
+                "move_steps": bonus.move_steps + effect.move_steps,
+            }
+        )
+        if effect.hp:
+            unit.current_hp += effect.hp  # бафф здоровья лечит на ту же величину
+        events.append(
+            EngineEvent(
+                kind="stat_buffed",
+                unit_id=unit.id,
+                amount=effect.hp or effect.damage or effect.attacks_per_turn
+                or effect.move_steps,
+            )
+        )
+    return events
+
+
+def _modify_budget(effect: ModifyBudget, targets: list[UnitState]) -> list[EngineEvent]:
+    events = []
+    for unit in targets:
+        unit.remaining_steps = max(0, unit.remaining_steps + effect.steps)
+        unit.remaining_attacks = max(0, unit.remaining_attacks + effect.attacks)
+        events.append(
+            EngineEvent(
+                kind="budget_modified",
+                unit_id=unit.id,
+                amount=effect.steps or effect.attacks,
+            )
         )
     return events
 

@@ -25,8 +25,9 @@ class TargetSelector(BaseModel):
     model_config = {"frozen": True}
 
     # cell — только выбранная клетка; pattern — зона вокруг неё (развёртка по
-    # стороне кастера, H7); board — всё поле, точка применения не нужна.
-    scope: Literal["cell", "pattern", "board"] = "cell"
+    # стороне кастера, H7); board — всё поле, точка применения не нужна;
+    # self — сам носитель способности (клетка origin).
+    scope: Literal["cell", "pattern", "board", "self"] = "cell"
     pattern: CellPattern | None = None
     side: TargetSide = TargetSide.ANY
     tag: str | None = None

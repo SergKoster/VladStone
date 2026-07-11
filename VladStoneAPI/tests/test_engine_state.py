@@ -22,7 +22,6 @@ from app.domain.combat.engine import (
     spawn_unit,
     validate_state,
 )
-from app.domain.combat.engine.statuses import STATUS_POISON
 from app.domain.combat.models import HeroState, PlayerSide, PlayerState
 
 ROWS, COLS = 5, 5
@@ -119,7 +118,7 @@ def test_validate_state_catches_survivors_of_missed_waves() -> None:
 def test_validate_state_catches_broken_statuses_and_references() -> None:
     ctx = make_ctx()
     unit = add_unit(ctx, uid="u", owner="p1", row=3, col=1)
-    unit.statuses.append(Status(id=STATUS_POISON, stacks=1, ttl=2))
+    unit.statuses.append(Status(id="forced_stance", stance=Stance.ATTACK, ttl=2))
     # Прямое присваивание обходит валидаторы pydantic — validate_state ловит.
     unit.statuses[0].ttl = 0
     with pytest.raises(StateValidationError, match="ttl 0"):
@@ -195,7 +194,7 @@ def test_ttl_tick_reconstructs_statuses_through_validation() -> None:
     # значения не переживают конец хода незамеченными.
     ctx = make_ctx()
     unit = add_unit(ctx, uid="u", owner="p1", row=4, col=0)
-    unit.statuses.append(Status(id=STATUS_POISON, stacks=1, ttl=3))
+    unit.statuses.append(Status(id="forced_stance", stance=Stance.DEFENSE, ttl=3))
     resolve_turn_v4(
         ctx,
         turn=1,
@@ -203,5 +202,5 @@ def test_ttl_tick_reconstructs_statuses_through_validation() -> None:
         intents=[PlayerIntents(player_id="p1")],
         mana_gain=lambda t: 0,
     )
-    poison = next(s for s in unit.statuses if s.id == STATUS_POISON)
-    assert poison.ttl == 2  # единый тик I4 прошёл валидацию
+    forced = next(s for s in unit.statuses if s.id == "forced_stance")
+    assert forced.ttl == 2  # единый тик I4 прошёл валидацию
