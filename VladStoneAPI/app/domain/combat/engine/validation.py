@@ -14,8 +14,9 @@ from app.domain.combat.engine.apply import HAND_CAP, EffectContext
 from app.domain.combat.engine.cards import CardDefinition, CardType
 from app.domain.combat.engine.patterns import CellPattern
 from app.domain.combat.engine.statuses import KNOWN_STATUSES, STATUS_FORCED_STANCE
-from app.domain.combat.engine.tags import KNOWN_TAGS
+from app.domain.combat.engine.tags import KNOWN_TAGS, TAG_TOWER
 from app.domain.combat.engine.units import UnitBlueprint, UnitState
+from app.domain.combat.models import PlayerSide
 
 
 class StateValidationError(ValueError):
@@ -102,7 +103,12 @@ def validate_state(ctx: EffectContext, *, checkpoint: str = "") -> None:
         seen_ids.add(unit.id)
         if unit.blueprint_id not in ctx.blueprints:
             fail(f"Unit {unit.id!r} references unknown blueprint {unit.blueprint_id!r}")
-        if not (0 <= unit.row < ctx.rows and 0 <= unit.col < ctx.cols):
+        if TAG_TOWER in ctx.blueprints[unit.blueprint_id].tags:
+            # Башня живёт строго на призрачном ряду СВОЕЙ стороны (§17).
+            expected_row = -1 if unit.side == PlayerSide.TOP else ctx.rows
+            if unit.row != expected_row or not 0 <= unit.col < ctx.cols:
+                fail(f"Tower {unit.id!r} is off its ghost row at ({unit.row}, {unit.col})")
+        elif not (0 <= unit.row < ctx.rows and 0 <= unit.col < ctx.cols):
             fail(f"Unit {unit.id!r} is off-board at ({unit.row}, {unit.col})")
         cell = (unit.row, unit.col)
         if cell in seen_cells:

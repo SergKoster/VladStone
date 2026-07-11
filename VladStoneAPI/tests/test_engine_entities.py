@@ -163,11 +163,19 @@ def test_coverage_forward_flips_by_side_columns_stay_absolute() -> None:
     assert bottom == [(2, 1)]
 
 
-def test_coverage_clips_cells_outside_the_board() -> None:
-    pattern = CellPattern(offsets=(CellOffset(forward=2, col=0), CellOffset(forward=1, col=-1)))
+def test_coverage_clips_cells_beyond_ghost_rows() -> None:
+    pattern = CellPattern(
+        offsets=(
+            CellOffset(forward=2, col=0),
+            CellOffset(forward=1, col=-1),
+            CellOffset(forward=3, col=0),
+        )
+    )
     cells = pattern.resolve(row=1, col=0, side=PlayerSide.BOTTOM, rows=BOARD_ROWS, cols=BOARD_COLS)
-    # forward=2 от ряда 1 вверх — за полем; col −1 от колонки 0 — за полем.
-    assert cells == []
+    # forward=2 от ряда 1 вверх — ряд −1: ПРИЗРАЧНЫЙ ряд башен, покрытие туда
+    # дотягивается (§17); col −1 — за полем; forward=3 (ряд −2) — за пределами
+    # даже призрачного ряда.
+    assert cells == [(-1, 0)]
 
 
 def test_spawn_zone_rows_resolve_per_side() -> None:

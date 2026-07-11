@@ -37,6 +37,7 @@ from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIn
 from app.domain.combat.engine.patterns import forward_direction
 from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.statuses import STATUS_POISON, tick_statuses
+from app.domain.combat.engine.tags import TAG_TOWER
 from app.domain.combat.engine.units import UnitState, current_stance, spawn_unit
 from app.domain.combat.engine.validation import validate_state
 from app.domain.combat.models import PlayerSide, PlayerState
@@ -410,8 +411,20 @@ def _pick_attack_target(ctx: EffectContext, unit: UnitState, stance: Stance) -> 
     ]
     if not enemies:
         return None
+    if TAG_TOWER in blueprint.tags:
+        # Тай-брейк башни (C2): своя линия — ближняя к башне раньше; иначе
+        # самая левая цель на соседних линиях.
+        return min(
+            enemies,
+            key=lambda enemy: (
+                enemy.col != unit.col,
+                abs(enemy.row - unit.row),
+                enemy.col,
+            ),
+        )
     # «Ближе к герою владельца» = ближе к краю поля владельца юнита:
-    # для BOTTOM — большие ряды, для TOP — меньшие.
+    # для BOTTOM — большие ряды, для TOP — меньшие. Башня на призрачном ряду
+    # автоматически самая дальняя цель: юнит бьёт её, когда некого больше.
     towards_owner = -1 if unit.side == PlayerSide.BOTTOM else 1
     return min(enemies, key=lambda enemy: (towards_owner * enemy.row, enemy.col))
 

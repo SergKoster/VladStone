@@ -54,7 +54,9 @@ class UnitState(BaseModel):
     blueprint_id: str
     owner_id: str
     side: PlayerSide
-    row: int = Field(ge=0)
+    # Ряд −1 (верх) и rows (низ) — «призрачные» клетки башен за краем поля
+    # (§17); обычный юнит туда попасть не может (validate_state следит).
+    row: int = Field(ge=-1)
     col: int = Field(ge=0)
     # Потолка HP нет (Q4): лечение может поднять выше базового. Отрицательные
     # значения легальны ВНУТРИ итерации (C3: HP живёт, смерть проверяется

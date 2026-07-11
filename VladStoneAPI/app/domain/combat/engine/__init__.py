@@ -51,6 +51,16 @@ from app.domain.combat.engine.tags import (
     TAG_TOWER,
 )
 from app.domain.combat.engine.targeting import TargetSelector, TargetSide
+from app.domain.combat.engine.towers import (
+    TOWER_BLUEPRINT,
+    TOWER_HP,
+    add_towers,
+    all_teams_eliminated,
+    ghost_row,
+    run_judgement,
+    towers_of,
+    winner_team_by_towers,
+)
 from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import (
     UnitBlueprint,
@@ -77,6 +87,8 @@ __all__ = [
     "TAG_IMMOVABLE",
     "TAG_STRUCTURE",
     "TAG_TOWER",
+    "TOWER_BLUEPRINT",
+    "TOWER_HP",
     "Ability",
     "ApplyStatus",
     "CardDefinition",
@@ -112,16 +124,22 @@ __all__ = [
     "UnitBlueprint",
     "UnitState",
     "UnitStats",
+    "add_towers",
+    "all_teams_eliminated",
     "apply_effect",
     "apply_forced_stance",
     "canonical_units_json",
     "current_stance",
+    "ghost_row",
     "plan_bot_intents",
     "resolve_turn_v4",
     "run_death_wave",
+    "run_judgement",
     "select_targets",
     "spawn_unit",
     "tick_statuses",
+    "towers_of",
+    "winner_team_by_towers",
     "translate_engine_events",
     "unit_tags",
     "validate_blueprint",

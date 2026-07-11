@@ -47,15 +47,18 @@ class CellPattern(BaseModel):
     ) -> list[tuple[int, int]]:
         """Абсолютные клетки паттерна от позиции юнита; вне поля — отрезаются.
 
-        Порядок результата — канонический (по чтению поля: ряд, колонка),
-        тот же тайбрейк, что и у всего боя (ARCH §5.1).
+        Ряды −1 и rows — «призрачные» клетки башен (§17): покрытия и зоны
+        эффектов до них ДОТЯГИВАЮТСЯ (иначе башни недосягаемы), а правила
+        движения/спавна работают по строгим границам поля и не пускают туда
+        юнитов. Порядок результата — канонический (по чтению поля: ряд,
+        колонка), тот же тайбрейк, что и у всего боя (ARCH §5.1).
         """
         direction = forward_direction(side)
         cells = set()
         for offset in self.offsets:
             target_row = row + offset.forward * direction
             target_col = col + offset.col
-            if 0 <= target_row < rows and 0 <= target_col < cols:
+            if -1 <= target_row <= rows and 0 <= target_col < cols:
                 cells.add((target_row, target_col))
         return sorted(cells)
 

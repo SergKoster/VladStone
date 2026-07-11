@@ -14,6 +14,8 @@ from app.domain.combat.engine.apply import EffectContext
 from app.domain.combat.engine.cards import CardType
 from app.domain.combat.engine.effects import Heal
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
+from app.domain.combat.engine.tags import TAG_STRUCTURE
+from app.domain.combat.engine.units import unit_tags
 from app.domain.combat.models import PlayerSide
 
 
@@ -86,11 +88,14 @@ def _plan_spell(
         return SpellIntent(card_id=card_id)
     # Точечный скрипт: лечащий — в своего, прочие — во врага. Классификация
     # по первому действию — заглушка уровня «легально и не в молоко».
+    # Структуры (башни) исключаем: они иммунны к урону эффектов (F4) —
+    # молния в башню ушла бы в молоко.
     prefers_ally = isinstance(script.actions[0].effect, Heal)
     candidates = [
         unit
         for unit in ctx.units
         if (unit.side == side) == prefers_ally
+        and TAG_STRUCTURE not in unit_tags(unit, ctx.blueprint_of(unit))
     ]
     if not candidates:
         return None
