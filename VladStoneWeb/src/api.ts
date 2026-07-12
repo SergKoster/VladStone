@@ -34,23 +34,45 @@ export type CollectionCard = {
   ascension: "Дефолт" | "Возвышенный" | "Возвышенный+";
 };
 
+export type CombatStance = "attack" | "defense";
+
+export type CombatUnitStatus = { id: string; stacks: number; ttl: number | null };
+
+/** Юнит боя v4: позиция row/col, стойка, статусы, флаг башни. */
 export type CombatUnit = {
   id: string;
   owner_id: string;
   side: "top" | "bottom";
-  card_id: string;
-  position: { row: number; col: number };
+  blueprint_id: string;
+  /** id карты для арта; у башен null. */
+  card_id: string | null;
+  row: number;
+  col: number;
   current_hp: number;
+  max_hp: number;
+  damage: number;
+  stance: CombatStance;
+  is_tower: boolean;
+  statuses: CombatUnitStatus[];
   remaining_steps: number;
   remaining_attacks: number;
-  stats: {
-    hp: number;
-    damage: number;
-    attack_range: number;
-    move_steps: number;
-    attacks: number;
-    action_priority: string;
-  };
+};
+
+/** Карта каталога боя v4 (/combat/catalog): арт, статы, покрытия, зона спавна. */
+export type CombatCatalogCard = {
+  id: string;
+  name: string;
+  cost: number;
+  rarity: Rarity;
+  card_type: "unit" | "spell";
+  board: { rows: number; cols: number };
+  stats?: { hp: number; damage: number; attacks_per_turn: number; move_steps: number };
+  coverage_attack?: Array<{ forward: number; col: number }>;
+  coverage_defense?: Array<{ forward: number; col: number }>;
+  /** Ряды зоны спавна, считая от своего края (1 = задний). */
+  spawn_rows?: number[];
+  damage_defense?: number | null;
+  spell_id?: string;
 };
 
 export type CombatEvent = {
@@ -123,7 +145,6 @@ export type CombatMatch = {
     team: number;
     is_bot: boolean;
     mana: number;
-    hero: { owner_id: string; side: "top" | "bottom"; hp: number };
     /** Server-authoritative hand — populated only for the viewer's own seat. */
     hand: string[];
     hand_count: number;
@@ -139,6 +160,7 @@ export type CombatMatch = {
     /** "expired" — матч закрыт сервером (напр. сменились правила боя), не проигрыш. */
     status: "active" | "finished" | "expired";
     winner_id: string | null;
+    winner_team: number | null;
     reward_coins: number;
   };
 };
@@ -156,6 +178,12 @@ export type Placement = {
   card_id: string;
   row: number;
   col: number;
+};
+
+export type SpellCast = {
+  card_id: string;
+  row?: number | null;
+  col?: number | null;
 };
 
 export function requestEmailCode(email: string) {
@@ -199,8 +227,8 @@ export function getMe() {
   return request<ProfileResponse>("/me");
 }
 
-export function getCardCatalog() {
-  return request<{ cards: CollectionCard[] }>("/combat/catalog");
+export function getCombatCatalog() {
+  return request<{ cards: CombatCatalogCard[] }>("/combat/catalog");
 }
 
 export function getCollection() {
@@ -234,10 +262,15 @@ export function getActiveCombats() {
   return request<{ matches: CombatMatch[] }>("/combat/active");
 }
 
-export function resolveCombat(matchId: string, turn: number, placements: Placement[]) {
+export function resolveCombat(
+  matchId: string,
+  turn: number,
+  placements: Placement[],
+  spells: SpellCast[] = [],
+) {
   return request<CombatResponse>("/combat/resolve", {
     method: "POST",
-    body: JSON.stringify({ match_id: matchId, turn, placements }),
+    body: JSON.stringify({ match_id: matchId, turn, placements, spells }),
   });
 }
 

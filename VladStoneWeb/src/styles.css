@@ -1416,3 +1416,249 @@ nav {
     width: min(180px, 60%);
   }
 }
+
+/* --- Боёвка v4: поле из данных (rows/cols), башни, юниты, рука --- */
+.battle-v4 {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(240px, 340px);
+  gap: 18px;
+  align-items: start;
+  max-width: 1100px;
+  min-height: calc(100dvh - 56px);
+}
+
+.battle-empty {
+  display: grid;
+  place-items: center;
+  min-height: calc(100dvh - 120px);
+}
+
+.rt-status {
+  align-self: center;
+  margin-right: auto;
+  color: #6b7d75;
+  font-size: 0.72rem;
+}
+
+.board-v4 {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  gap: 5px;
+  aspect-ratio: var(--cols) / var(--rows);
+  width: 100%;
+}
+
+.cell-v4 {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #cfdbd3;
+  border-radius: 8px;
+  background: #f4f8f5;
+  aspect-ratio: 1;
+  min-width: 0;
+}
+
+.cell-v4.ok {
+  border-color: #3f9d5f;
+  background: #dff3e4;
+  box-shadow: inset 0 0 0 2px #7fca97;
+}
+
+.plan-mark {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #2f68a3;
+  text-align: center;
+  line-height: 1.05;
+}
+.plan-mark.spell {
+  color: #8a4bc0;
+}
+
+.unit-v4 {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 92%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px #2d5f4d;
+}
+.unit-v4.top {
+  box-shadow: 0 0 0 2px #9d3d35;
+}
+.unit-v4.stance-defense {
+  box-shadow: 0 0 0 2px #2f68a3;
+}
+
+.unit-v4-art {
+  position: absolute;
+  inset: 0;
+}
+.unit-v4-art > .card-art {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.unit-v4-hp {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  min-width: 15px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: rgba(20, 32, 27, 0.82);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+.unit-v4-status {
+  position: absolute;
+  left: 2px;
+  top: 1px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: rgba(122, 60, 160, 0.9);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.tower-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 5px;
+}
+
+.tower {
+  display: grid;
+  gap: 2px;
+  padding: 3px 4px;
+  border: 1px solid #b9c8bf;
+  border-radius: 6px;
+  background: #eef3ef;
+  text-align: center;
+}
+.tower.dead {
+  opacity: 0.35;
+}
+.tower-hp {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #21372f;
+}
+.tower-bar {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: #d3ddd6;
+  overflow: hidden;
+}
+.tower-bar > span {
+  display: block;
+  height: 100%;
+  background: #3f9d5f;
+  transition: width 220ms ease;
+}
+
+.hand-v4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
+}
+
+.hand-card-v4 {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #cfdbd3;
+  border-radius: 10px;
+  background: #fbfcfa;
+  cursor: pointer;
+}
+.hand-card-v4.active {
+  border-color: #2f7fd0;
+  box-shadow: 0 0 0 2px #9cc4ea;
+}
+.hand-card-v4.planned {
+  opacity: 0.4;
+}
+.hand-card-v4.poor {
+  opacity: 0.55;
+  filter: grayscale(0.5);
+}
+.hand-card-art {
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.hand-card-art > .card-art {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+.hand-card-name {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #21372f;
+  line-height: 1.05;
+  text-align: center;
+}
+.hand-card-cost {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  min-width: 16px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: #2f7fd0;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.resolve-btn {
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: #2d5f4d;
+  color: #f8faf6;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.resolve-btn:disabled {
+  opacity: 0.5;
+}
+
+.battle-log {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #e0e7e2;
+  border-radius: 8px;
+  background: #fafbfa;
+  color: #4a5a52;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+@media (max-width: 720px) {
+  .battle-v4 {
+    grid-template-columns: 1fr;
+  }
+}

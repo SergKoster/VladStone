@@ -5,10 +5,11 @@ import "./styles.css";
 import {
   type AuthProviders,
   type AuthUser,
+  type CombatCatalogCard,
   type CollectionCard,
   getAuthProviders,
-  getCardCatalog,
   getCollection,
+  getCombatCatalog,
   getMe,
   googleDevLogin,
   googleLoginUrl,
@@ -17,7 +18,7 @@ import {
   verifyEmailCode,
 } from "./api";
 import { AuthScreen } from "./features/auth/AuthScreen";
-import { Battle } from "./features/battle/Battle";
+import { BattleV4 } from "./features/battle/BattleV4";
 import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Profile } from "./features/profile/Profile";
@@ -63,15 +64,14 @@ function App() {
     null,
   );
   const collectionState = useServerResource<CollectionCard[]>(
-    () =>
-      (authUser ? getCollection() : getCardCatalog()).then((payload) => payload.cards),
+    () => (authUser ? getCollection().then((payload) => payload.cards) : Promise.resolve([])),
     [authUser?.id],
     [],
   );
-  // Full card catalog: battle needs stats for any card id (hand, bot units),
-  // regardless of what the player owns.
-  const catalogState = useServerResource<CollectionCard[]>(
-    () => getCardCatalog().then((payload) => payload.cards),
+  // Combat catalog (v4): battle needs card data (art, cost, coverage, spawn
+  // zone) for any card id — hand, spells, bot units — regardless of ownership.
+  const catalogState = useServerResource<CombatCatalogCard[]>(
+    () => getCombatCatalog().then((payload) => payload.cards),
     [],
     [],
   );
@@ -187,7 +187,7 @@ function App() {
           <Collection cards={collection} onCollectionChange={collectionState.setData} />
         )}
         {route === "battle" && (
-          <Battle
+          <BattleV4
             cards={catalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
