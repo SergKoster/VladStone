@@ -1,0 +1,113 @@
+"""Живой матч v4 (этап 15в): создание, резолв, винкон/суд, payload."""
+
+import random
+
+from app.domain.combat.engine.battle import (
+    JUDGEMENT_TURN,
+    BattleStateV4,
+    create_v4_battle,
+    resolve_v4_turn,
+)
+from app.domain.combat.engine.content import DECK_CARD_IDS_V4
+from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent
+from app.domain.combat.engine.payload import v4_combat_response
+from app.domain.combat.engine.towers import towers_of
+from app.domain.combat.models import MatchLifecycleStatus
+
+
+def make_battle(seed: int = 1) -> BattleStateV4:
+    return create_v4_battle(match_id="local_pve_000042", user_id=7, rng=random.Random(seed))
+
+
+def human_of(state: BattleStateV4):
+    return next(p for p in state.players if not p.is_bot)
+
+
+def test_new_battle_has_towers_hands_and_deterministic_coin() -> None:
+    state = make_battle()
+    assert state.turn == 1 and state.status == MatchLifecycleStatus.PLANNING
+    assert state.planning_deadline is not None
+    # 5 башен на игрока = 10 юнитов, стартовые руки по 3 из 12-карточной колоды.
+    assert len(state.units) == 10
+    for player in state.players:
+        assert len(towers_of_state(state, player.id)) == 5
+        assert len(player.hand) == 3
+        assert len(player.deck) == len(DECK_CARD_IDS_V4) - 3
+    # Монетка выводится из id матча — воспроизводима (C1).
+    again = create_v4_battle(match_id="local_pve_000042", rng=random.Random(9))
+    assert again.spell_coin == state.spell_coin
+
+
+def towers_of_state(state, player_id):
+    from app.domain.combat.engine.battle import build_context
+
+    return towers_of(build_context(state), player_id)
+
+
+def test_resolve_advances_turn_and_serializes_round_trip() -> None:
+    state = make_battle()
+    human = human_of(state)
+    # Сыграть дешёвого юнита из руки в свою зону спавна.
+    playable = next(cid for cid in human.hand if cid in ("test_bruiser", "red_skull", "matesha"))
+    events = resolve_v4_turn(
+        state,
+        human_intents=PlayerIntents(
+            player_id=human.id, spawns=(SpawnIntent(card_id=playable, row=4, col=2),)
+        ),
+    )
+    assert state.turn == 2 and state.status == MatchLifecycleStatus.PLANNING
+    assert isinstance(events, list)
+
+    # Персистентность: состояние переживает JSON round-trip (запись в БД).
+    restored = BattleStateV4.model_validate_json(state.model_dump_json())
+    assert restored.turn == 2
+    assert len(restored.units) == len(state.units)
+    assert restored.spell_coin == state.spell_coin
+
+
+def test_win_condition_when_all_enemy_towers_gone() -> None:
+    state = make_battle()
+    from app.domain.combat.engine.battle import build_context
+
+    ctx = build_context(state)
+    bot_towers = towers_of(ctx, "p2")
+    state.units = [u for u in state.units if u not in bot_towers]  # снесли башни бота
+    resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human_of(state).id))
+    assert state.status == MatchLifecycleStatus.FINISHED
+    assert state.result.status == "finished"
+    assert state.result.winner_team == 0  # команда человека
+    assert state.result.reward_coins == 5
+
+
+def test_judgement_decides_at_the_threshold_turn() -> None:
+    state = make_battle()
+    state.turn = JUDGEMENT_TURN
+    # Ослабим одну башню бота — у человека «крепче слабейшая» при равном числе.
+    from app.domain.combat.engine.battle import build_context
+
+    ctx = build_context(state)
+    towers_of(ctx, "p2")[0].current_hp = 1
+    from app.domain.combat.engine.battle import apply_context
+
+    apply_context(state, ctx)
+
+    events = resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human_of(state).id))
+    assert events == []  # на суде ходы не разыгрываются
+    assert state.status == MatchLifecycleStatus.FINISHED
+    assert state.result.winner_team == 0
+
+
+def test_payload_hides_deck_and_opponent_hand() -> None:
+    state = make_battle()
+    human = human_of(state)
+    payload = v4_combat_response(state, viewer_id=human.id)["match"]
+    viewer = next(p for p in payload["players"] if p["id"] == human.id)
+    opponent = next(p for p in payload["players"] if p["id"] != human.id)
+    assert len(viewer["hand"]) == 3
+    assert opponent["hand"] == [] and opponent["hand_count"] == 3
+    assert all("deck" not in p for p in payload["players"])  # колода — секрет
+    assert payload["rows"] == 5 and payload["cols"] == 5
+    # Башни отмечены для клиента и стоят на призрачных рядах.
+    towers = [u for u in payload["units"] if u["is_tower"]]
+    assert len(towers) == 10
+    assert {u["row"] for u in towers} == {-1, 5}
