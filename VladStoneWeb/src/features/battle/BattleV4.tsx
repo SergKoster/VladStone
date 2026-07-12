@@ -34,6 +34,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const [resultDismissed, setResultDismissed] = React.useState(false);
   const [realtime, setRealtime] = React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const [secondsLeft, setSecondsLeft] = React.useState(TURN_SECONDS);
+  const autoSubmittedDeadline = React.useRef<string | null>(null);
 
   const viewer = match?.players.find((p) => p.id === match.viewer_id) ?? null;
   const enemy = match?.players.find((p) => viewer && p.team !== viewer.team) ?? null;
@@ -74,12 +75,27 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
         0,
         Math.ceil((Date.parse(match.planning_deadline!) - Date.now()) / 1000),
       );
-      setSecondsLeft(left);
+      setSecondsLeft(Math.min(TURN_SECONDS, left));
     };
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [match?.planning_deadline, match?.status]);
+
+  React.useEffect(() => {
+    if (
+      !match?.planning_deadline ||
+      match.status !== "planning" ||
+      secondsLeft > 0 ||
+      busy
+    ) {
+      return;
+    }
+    const deadlineKey = `${match.id}:${match.turn}:${match.planning_deadline}`;
+    if (autoSubmittedDeadline.current === deadlineKey) return;
+    autoSubmittedDeadline.current = deadlineKey;
+    void handleResolve();
+  }, [busy, match?.id, match?.planning_deadline, match?.status, match?.turn, secondsLeft]);
 
   React.useEffect(() => {
     if (isFinished) setResultDismissed(false);

@@ -7,9 +7,8 @@ MANA_CAP = 10
 # ruleset gate (ARCH §8.7) expires any v1/v2 match still in the DB.
 RULESET_VERSION = 3
 TURN_DURATION_SECONDS = 30
-# After a turn resolves, the next planning deadline is pushed back by a budget
-# that covers the client-side resolution animation, so animating micro-steps
-# never eats into a player's planning time (the turn timer stays frozen until
-# the animation is done). Scaled by the number of emitted combat events.
+# BattleV4 currently applies the resolved state without frame-by-frame animation,
+# so no animation budget is added to the next planning deadline. Restore the
+# buffer limit when event-by-event animations return.
 RESOLVE_STEP_SECONDS = 0.85
-MAX_RESOLVE_BUFFER_SECONDS = 22
+MAX_RESOLVE_BUFFER_SECONDS = 0
