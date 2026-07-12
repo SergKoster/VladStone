@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -8,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CombatMatchRecord
 from app.domain.combat.constants import RULESET_VERSION
-from app.domain.combat.models import CombatLogEntry, MatchLifecycleStatus, MatchState
+from app.domain.combat.engine.battle import BattleStateV4
+from app.domain.combat.models import MatchLifecycleStatus, MatchState
 
 ACTIVE_MATCH_STATUSES = (
     MatchLifecycleStatus.PLANNING.value,
@@ -80,9 +82,7 @@ class SqlAlchemyCombatMatchStore:
         for record in self.db.scalars(query):
             if _as_utc(record.updated_at) >= older_than:
                 continue
-            match = load_match(record)
-            match.status = MatchLifecycleStatus.EXPIRED
-            self.save(record, match)
+            _mark_record_expired_raw(record)
             expired_count += 1
         return expired_count
 
@@ -114,6 +114,16 @@ def save_match(record: CombatMatchRecord, match: MatchState) -> None:
     record.winner_id = match.result.winner_id
 
 
+def load_v4_battle(record: CombatMatchRecord) -> BattleStateV4:
+    return BattleStateV4.model_validate_json(record.state_json)
+
+
+def save_v4_battle(record: CombatMatchRecord, state: BattleStateV4) -> None:
+    record.state_json = state.model_dump_json()
+    record.status = state.status.value
+    record.winner_id = state.result.winner_id
+
+
 def expire_stale_combat_matches(
     db: Session,
     *,
@@ -126,26 +136,44 @@ def expire_stale_combat_matches(
     )
 
 
-def expire_combat_match_if_outdated(record: CombatMatchRecord) -> MatchState | None:
+def expire_combat_match_if_outdated(record: CombatMatchRecord) -> bool:
     """Gate: a match saved under another RULESET_VERSION never reaches the resolver.
 
     Rules change between deploys (v4 rework); replaying an old JSON state with a
     new resolver is undefined behaviour (ARCH §8.7). Such a match is gracefully
     expired instead: result.status "expired" (not a loss), a player-facing log
-    line, no rewards. Returns the expired state so callers can broadcast it,
-    or None when the version matches (or the match is already over).
+    line, no rewards.
+
+    Version is PEEKED from raw JSON (not a full model parse): the state shape
+    changes between rulesets, so a v2 (MVP) record must not be parsed with the
+    v4 model just to read its version. Returns True if the record was expired.
     """
     if record.status not in ACTIVE_MATCH_STATUSES:
-        return None
-    match = load_match(record)
-    if match.ruleset_version == RULESET_VERSION:
-        return None
-    match.status = MatchLifecycleStatus.EXPIRED
-    match.planning_deadline = None
-    match.result.status = "expired"
-    match.log.append(CombatLogEntry(message=RULESET_EXPIRED_MESSAGE))
-    save_match(record, match)
-    return match
+        return False
+    raw = json.loads(record.state_json)
+    if raw.get("ruleset_version") == RULESET_VERSION:
+        return False
+    # Patch the raw state shape-agnostically — works for any past version.
+    raw["status"] = MatchLifecycleStatus.EXPIRED.value
+    raw["planning_deadline"] = None
+    raw.setdefault("result", {})["status"] = "expired"
+    raw.setdefault("log", []).append({"message": RULESET_EXPIRED_MESSAGE})
+    record.state_json = json.dumps(raw, ensure_ascii=False)
+    record.status = MatchLifecycleStatus.EXPIRED.value
+    return True
+
+
+def expired_match_payload(match_id: str) -> dict:
+    """Минимальный payload закрытого гейтом матча (WS/HTTP) без парса состояния."""
+    return {
+        "match": {
+            "id": match_id,
+            "status": MatchLifecycleStatus.EXPIRED.value,
+            "result": {"status": "expired", "winner_id": None, "winner_team": None},
+            "log": [{"message": RULESET_EXPIRED_MESSAGE}],
+        },
+        "events": [],
+    }
 
 
 def expire_combat_match_if_stale(record: CombatMatchRecord, *, older_than: datetime) -> bool:
@@ -153,10 +181,16 @@ def expire_combat_match_if_stale(record: CombatMatchRecord, *, older_than: datet
         return False
     if _as_utc(record.updated_at) >= older_than:
         return False
-    match = load_match(record)
-    match.status = MatchLifecycleStatus.EXPIRED
-    save_match(record, match)
+    _mark_record_expired_raw(record)
     return True
+
+
+def _mark_record_expired_raw(record: CombatMatchRecord) -> None:
+    """Пометить запись EXPIRED без парса состояния — устойчиво к смене формата."""
+    raw = json.loads(record.state_json)
+    raw["status"] = MatchLifecycleStatus.EXPIRED.value
+    record.state_json = json.dumps(raw, ensure_ascii=False)
+    record.status = MatchLifecycleStatus.EXPIRED.value
 
 
 def _dump_match(match: MatchState) -> str:

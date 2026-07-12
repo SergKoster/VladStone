@@ -3,7 +3,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.db.session import SessionLocal
 from app.realtime.match_channels import match_channel_manager
 from app.services.auth import get_user_by_refresh_token
-from app.services.combat_matches import get_combat_match_record, load_match
+from app.services.combat_matches import (
+    expire_combat_match_if_outdated,
+    get_combat_match_record,
+    load_v4_battle,
+)
 from app.services.combat_turn_timers import resolve_expired_planning_match
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
@@ -23,11 +27,17 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
+        # Ruleset gate on connect: an old-version match closes gracefully
+        # instead of streaming an unparseable snapshot.
+        if expire_combat_match_if_outdated(record):
+            db.commit()
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         match = resolve_expired_planning_match(db, record)
         if match is not None:
             db.commit()
         else:
-            match = load_match(record)
+            match = load_v4_battle(record)
 
     await match_channel_manager.connect(match_id, websocket)
     try:

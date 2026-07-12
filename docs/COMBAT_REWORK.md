@@ -1161,10 +1161,12 @@ H4). DESIGN §3.5 переписан.
         (руки, 5 башен, монетка из id), resolve_v4_turn (боты + резолвер +
         винкон по башням + суд на ходу 50 + таймер); viewer-payload по R12.
         Полностью протестировано (create/resolve/win/суд/payload/round-trip).
-      - **15в-роуты**: version-aware персистенс (гейт читает версию из сырого
-        JSON — устойчив к смене формата), start/resolve/get/active и
-        таймер-воркер на v4, `ResolveTurnRequest` + spells, каталог v4, bump
-        `RULESET_VERSION` → 3, переписать API-тесты под v4.
+      - ✅ **15в-роуты** — **сделано** (июль 2026): персистенс version-aware
+        (гейт и stale-expiry читают/патчат сырой JSON — устойчивы к смене
+        формата), load/save_v4_battle, start/resolve/get/active и
+        таймер-воркер/WS на v4, `ResolveTurnRequest`+`spells`, каталог v4,
+        `RULESET_VERSION` → 3, API-тесты переписаны, tests/conftest.py — БД
+        в изолированный temp-файл (тесты больше не бьют в дев-БД).
       - **15в-фронт**: поле из `match.rows/cols` (снять хардкод 3×5), башни-
         юниты на призрачных рядах вместо строк «героев», рука/спеллы с
         выбором клетки, зоны спавна из каталога, анимации новых событий,

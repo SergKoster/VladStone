@@ -37,10 +37,18 @@ class PlacementRequest(BaseModel):
     col: int
 
 
+class SpellRequest(BaseModel):
+    card_id: str
+    # Точка применения; None — для заклинаний на всё поле (scope=board).
+    row: int | None = None
+    col: int | None = None
+
+
 class ResolveTurnRequest(BaseModel):
     match_id: str
     turn: int = Field(ge=1)
     placements: list[PlacementRequest] = Field(default_factory=list)
+    spells: list[SpellRequest] = Field(default_factory=list)
 
 
 class ClientEventRequest(BaseModel):

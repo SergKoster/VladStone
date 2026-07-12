@@ -2,10 +2,10 @@ BOARD_ROWS = 5
 BOARD_COLS = 3
 HERO_HP = 20
 MANA_CAP = 10
-# v2: participant model (R12) — per-player deck/hand/team, no "player"/"bot"
-# hardcode. Matches saved under v1 keep a state shape the new code no longer
-# plays; the ruleset gate (ARCH §8.7) expires them.
-RULESET_VERSION = 2
+# v3: combat engine v4 goes live (stances, 5 towers, phased resolver,
+# data-driven cards). The state shape changed again (BattleStateV4); the
+# ruleset gate (ARCH §8.7) expires any v1/v2 match still in the DB.
+RULESET_VERSION = 3
 TURN_DURATION_SECONDS = 30
 # After a turn resolves, the next planning deadline is pushed back by a budget
 # that covers the client-side resolution animation, so animating micro-steps

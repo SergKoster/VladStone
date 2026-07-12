@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -7,17 +8,15 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
-from app.domain.catalog import starter_catalog_payload
-from app.domain.combat.deck import covers_hand
-from app.domain.combat.helpers import human_players
-from app.domain.combat.models import MatchLifecycleStatus, MatchState, Position
-from app.domain.combat.rules import (
-    apply_placements,
-    apply_simple_bot_turn,
-    create_demo_match,
-    create_player_match,
-    resolve_turn,
+from app.domain.combat.engine.battle import (
+    BattleStateV4,
+    create_v4_battle,
+    resolve_v4_turn,
 )
+from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
+from app.domain.combat.engine.payload import v4_catalog_payload, v4_combat_response
+from app.domain.combat.helpers import human_players
+from app.domain.combat.models import MatchLifecycleStatus
 from app.realtime.match_channels import match_channel_manager
 from app.services.accounts import audit
 from app.services.auth import get_user_by_refresh_token
@@ -26,14 +25,13 @@ from app.services.combat_matches import (
     expire_combat_match_if_outdated,
     expire_combat_match_if_stale,
     expire_stale_combat_matches,
+    expired_match_payload,
     get_combat_match_record,
     list_active_combat_match_records,
-    load_match,
-    save_match,
+    load_v4_battle,
+    save_v4_battle,
 )
-from app.services.combat_payloads import combat_response
 from app.services.combat_turn_timers import resolve_expired_planning_match
-from app.services.dev_logging import append_dev_log
 from app.services.rewards import claim_combat_reward
 
 router = APIRouter(prefix="/combat", tags=["combat"])
@@ -44,17 +42,7 @@ STALE_MATCH_TTL_HOURS = 24
 
 @router.get("/catalog")
 def get_card_catalog() -> dict:
-    return {"cards": starter_catalog_payload()}
-
-
-@router.get("/demo")
-def get_combat_demo() -> dict:
-    match = create_demo_match()
-    resolved = resolve_turn(match)
-    return {
-        "initial": combat_response(match),
-        "resolved": combat_response(resolved),
-    }
+    return {"cards": v4_catalog_payload()}
 
 
 @router.post("/start")
@@ -63,17 +51,18 @@ def start_combat(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
-    match = create_player_match(user_id=user.id if user else None)
-    create_combat_match_record(db, match=match, owner_user_id=user.id if user else None)
+    state = create_v4_battle(
+        match_id=f"local_pve_{uuid4().hex}", user_id=user.id if user else None
+    )
+    create_combat_match_record(db, match=state, owner_user_id=user.id if user else None)
     audit(
         db,
         user.id if user else None,
         "combat.match_started",
-        {"match_id": match.id, "status": match.status.value},
+        {"match_id": state.id, "status": state.status.value},
     )
     db.commit()
-    append_dev_log("combat-server.jsonl", "combat_start", {"match": _match_snapshot(match)})
-    return combat_response(match)
+    return v4_combat_response(state)
 
 
 @router.get("/active")
@@ -90,40 +79,18 @@ def list_active_combat(
         owner_user_id=user.id,
     )
     if expired_count:
-        audit(
-            db,
-            user.id,
-            "combat.matches_expired",
-            {"expired_count": expired_count},
-        )
+        audit(db, user.id, "combat.matches_expired", {"expired_count": expired_count})
         db.commit()
-        append_dev_log(
-            "combat-server.jsonl",
-            "combat_matches_expired",
-            {"user_id": user.id, "expired_count": expired_count},
-        )
     records = list_active_combat_match_records(db, owner_user_id=user.id)
     # Ruleset gate: matches from an older ruleset are expired here instead of
     # being offered for restore (the client must never resume them).
-    outdated_ids = [
-        record.id for record in records if expire_combat_match_if_outdated(record) is not None
-    ]
+    outdated_ids = [record.id for record in records if expire_combat_match_if_outdated(record)]
     if outdated_ids:
         for match_id in outdated_ids:
             audit(db, user.id, "combat.match_expired_ruleset", {"match_id": match_id})
         db.commit()
-        append_dev_log(
-            "combat-server.jsonl",
-            "combat_matches_expired_ruleset",
-            {"user_id": user.id, "match_ids": outdated_ids},
-        )
         records = [record for record in records if record.id not in outdated_ids]
-    return {
-        "matches": [
-            combat_response(load_match(record))["match"]
-            for record in records
-        ]
-    }
+    return {"matches": [v4_combat_response(load_v4_battle(record))["match"] for record in records]}
 
 
 @router.get("/{match_id}")
@@ -133,12 +100,14 @@ async def get_combat_match(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     record = _get_authorized_record(db, match_id, refresh_token)
-    _expire_record_if_stale(db, record)
+    if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
+        await match_channel_manager.broadcast_expired(match_id)
+        return expired_match_payload(match_id)
     resolved = _resolve_expired_record_if_needed(db, record)
     if resolved is not None:
         await match_channel_manager.broadcast_match_update(resolved)
-        return combat_response(resolved)
-    return combat_response(load_match(record))
+        return v4_combat_response(resolved)
+    return v4_combat_response(load_v4_battle(record))
 
 
 @router.post("/resolve")
@@ -148,96 +117,63 @@ async def resolve_combat_turn(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     record = _get_authorized_record(db, payload.match_id, refresh_token)
-    _expire_record_if_stale(db, record)
+    if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
+        await match_channel_manager.broadcast_expired(payload.match_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat ruleset changed; match expired",
+        )
     deadline_resolved = _resolve_expired_record_if_needed(db, record)
     if deadline_resolved is not None:
         await match_channel_manager.broadcast_match_update(deadline_resolved)
-        if deadline_resolved.status == MatchLifecycleStatus.EXPIRED:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Combat ruleset changed; match expired",
-            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn deadline has passed",
         )
     user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
 
-    match = load_match(record)
-    match.events = []
-    # Fresh event stream for this turn: setup spawns below are iteration 0.
-    match.current_iteration = 0
-    append_dev_log(
-        "combat-server.jsonl",
-        "combat_resolve_request",
-        {
-            "match": _match_snapshot(match),
-            "turn": payload.turn,
-            "placements": [placement.model_dump(mode="json") for placement in payload.placements],
-        },
-    )
-    if match.status == MatchLifecycleStatus.PLANNING:
-        if payload.turn != match.turn:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Combat turn is no longer current",
-            )
-        # PvE: placements always belong to the match's single human seat.
-        # PvP (later phase) will map the authenticated user to their seat here.
-        acting_player = human_players(match)[0]
-        # The hand is server-authoritative: every placement must reference a card
-        # that is actually in the player's hand this turn.
-        if not covers_hand(acting_player, [p.card_id for p in payload.placements]):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Placement uses a card that is not in hand",
-            )
-        placements = [
-            (placement.card_id, Position(row=placement.row, col=placement.col))
-            for placement in payload.placements
-        ]
-        # from_hand: each successful spawn consumes its card from the hand
-        # (skipped placements keep theirs).
-        match = apply_placements(
-            match,
-            placements,
-            owner_id=acting_player.id,
-            from_hand=True,
-        )
-        match = apply_simple_bot_turn(match)
-        resolved = resolve_turn(match)
-        save_match(record, resolved)
-    else:
+    state = load_v4_battle(record)
+    if state.status != MatchLifecycleStatus.PLANNING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Combat match is {match.status}",
+            detail=f"Combat match is {state.status.value}",
         )
+    if payload.turn != state.turn:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat turn is no longer current",
+        )
+
+    acting_player = human_players(state)[0]
+    intents = _build_intents(acting_player.id, payload)
+    events = resolve_v4_turn(state, human_intents=intents)
+    save_v4_battle(record, state)
 
     try:
         reward_claimed = user is not None and claim_combat_reward(
-            db, match=resolved, user_id=user.id
+            db, match=state, user_id=user.id
         )
         audit(
             db,
             user.id if user else None,
             "combat.turn_resolved",
             {
-                "match_id": resolved.id,
+                "match_id": state.id,
                 "turn": payload.turn,
-                "next_turn": resolved.turn,
-                "status": resolved.status.value,
-                "events_count": len(resolved.events),
+                "next_turn": state.turn,
+                "status": state.status.value,
+                "events_count": len(events),
             },
         )
-        if resolved.result.status == "finished":
+        if state.result.status == "finished":
             audit(
                 db,
                 user.id if user else None,
                 "combat.match_finished",
                 {
-                    "match_id": resolved.id,
-                    "winner_id": resolved.result.winner_id,
-                    "reward_coins": resolved.result.reward_coins,
+                    "match_id": state.id,
+                    "winner_team": state.result.winner_team,
+                    "reward_coins": state.result.reward_coins,
                 },
             )
         if reward_claimed:
@@ -245,19 +181,7 @@ async def resolve_combat_turn(
                 db,
                 user.id if user else None,
                 "combat.reward_claimed",
-                {
-                    "match_id": resolved.id,
-                    "coins": resolved.result.reward_coins,
-                },
-            )
-            append_dev_log(
-                "combat-server.jsonl",
-                "combat_reward_claimed",
-                {
-                    "match_id": resolved.id,
-                    "user_id": user.id,
-                    "coins": resolved.result.reward_coins,
-                },
+                {"match_id": state.id, "coins": state.result.reward_coins},
             )
         db.commit()
     except StaleDataError:
@@ -268,28 +192,28 @@ async def resolve_combat_turn(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn was already resolved elsewhere",
         ) from None
-    append_dev_log(
-        "combat-server.jsonl",
-        "combat_resolve_response",
-        {"match": _match_snapshot(resolved)},
-    )
-    response = combat_response(resolved)
-    await match_channel_manager.broadcast_match_update(resolved)
+
+    response = v4_combat_response(state, viewer_id=acting_player.id, events=events)
+    await match_channel_manager.broadcast_match_update(state)
     return response
 
 
-def _get_authorized_record(
-    db: Session,
-    match_id: str,
-    refresh_token: str | None,
-):
+def _build_intents(player_id: str, payload: ResolveTurnRequest) -> PlayerIntents:
+    spawns = tuple(
+        SpawnIntent(card_id=p.card_id, row=p.row, col=p.col) for p in payload.placements
+    )
+    spells = tuple(
+        SpellIntent(card_id=s.card_id, row=s.row, col=s.col) for s in payload.spells
+    )
+    return PlayerIntents(player_id=player_id, spells=spells, spawns=spawns)
+
+
+def _get_authorized_record(db: Session, match_id: str, refresh_token: str | None):
     record = get_combat_match_record(db, match_id)
     if record is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Combat match not found",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Combat match not found"
         )
-
     user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
     if record.owner_user_id is not None and (user is None or record.owner_user_id != user.id):
         raise HTTPException(
@@ -299,40 +223,32 @@ def _get_authorized_record(
     return record
 
 
-def _expire_record_if_stale(db: Session, record) -> None:
+def _expire_record_if_stale(db: Session, record) -> bool:
     if not expire_combat_match_if_stale(record, older_than=_stale_match_cutoff()):
-        return
-    audit(
-        db,
-        record.owner_user_id,
-        "combat.match_expired",
-        {"match_id": record.id},
-    )
+        return False
+    audit(db, record.owner_user_id, "combat.match_expired", {"match_id": record.id})
     db.commit()
-    append_dev_log(
-        "combat-server.jsonl",
-        "combat_match_expired",
-        {"match_id": record.id, "owner_user_id": record.owner_user_id},
-    )
+    return True
 
 
-def _resolve_expired_record_if_needed(db: Session, record) -> MatchState | None:
+def _expire_record_if_outdated(db: Session, record) -> bool:
+    if not expire_combat_match_if_outdated(record):
+        return False
+    audit(db, record.owner_user_id, "combat.match_expired_ruleset", {"match_id": record.id})
+    db.commit()
+    return True
+
+
+def _resolve_expired_record_if_needed(db: Session, record) -> BattleStateV4 | None:
     try:
         resolved = resolve_expired_planning_match(db, record)
         if resolved is None:
             return None
-        # The ruleset gate also lands here: an old-version match comes back
-        # EXPIRED (never resolved) and gets its own audit trail.
-        expired_by_gate = resolved.status == MatchLifecycleStatus.EXPIRED
         audit(
             db,
             record.owner_user_id,
-            "combat.match_expired_ruleset" if expired_by_gate else "combat.turn_deadline_resolved",
-            {
-                "match_id": resolved.id,
-                "turn": resolved.turn,
-                "status": resolved.status.value,
-            },
+            "combat.turn_deadline_resolved",
+            {"match_id": resolved.id, "turn": resolved.turn, "status": resolved.status.value},
         )
         db.commit()
     except StaleDataError:
@@ -341,65 +257,8 @@ def _resolve_expired_record_if_needed(db: Session, record) -> MatchState | None:
         db.rollback()
         db.refresh(record)
         return None
-    append_dev_log(
-        "combat-server.jsonl",
-        "combat_match_expired_ruleset" if expired_by_gate else "combat_turn_deadline_resolved",
-        {"match": _match_snapshot(resolved)},
-    )
     return resolved
 
 
 def _stale_match_cutoff() -> datetime:
     return datetime.now(UTC) - timedelta(hours=STALE_MATCH_TTL_HOURS)
-
-
-def _match_snapshot(match: MatchState) -> dict:
-    return {
-        "id": match.id,
-        "turn": match.turn,
-        "players": [
-            {
-                "id": player.id,
-                "side": player.side,
-                "team": player.team,
-                "is_bot": player.is_bot,
-                "mana": player.mana,
-                "hero_hp": player.hero.hp,
-                "hand_count": len(player.hand),
-                "deck_count": len(player.deck),
-            }
-            for player in match.players
-        ],
-        "units": [
-            {
-                "id": unit.id,
-                "side": unit.side,
-                "card_id": unit.card_id,
-                "row": unit.position.row,
-                "col": unit.position.col,
-                "hp": unit.current_hp,
-                "steps": unit.remaining_steps,
-                "attacks": unit.remaining_attacks,
-            }
-            for unit in match.units
-        ],
-        "log_tail": [entry.message for entry in match.log[-10:]],
-        "events_tail": [
-            {
-                "type": event.type,
-                "message": event.message,
-                "actor_id": event.actor_id,
-                "target_id": event.target_id,
-                "target_kind": event.target_kind,
-                "damage": event.damage,
-                "from_position": event.from_position.model_dump() if event.from_position else None,
-                "to_position": event.to_position.model_dump() if event.to_position else None,
-                "before_hp": event.before_hp,
-                "after_hp": event.after_hp,
-                "sequence": event.sequence,
-                "micro_step": event.micro_step,
-            }
-            for event in match.events[-20:]
-        ],
-        "result": match.result.model_dump(mode="json"),
-    }

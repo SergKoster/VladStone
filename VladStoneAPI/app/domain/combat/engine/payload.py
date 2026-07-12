@@ -7,7 +7,9 @@ players/units/rows/cols/viewer_id + events. Анти-чит инварианты
 """
 
 from app.domain.combat.engine.battle import BattleStateV4, build_context
-from app.domain.combat.engine.content import CARDS
+from app.domain.combat.engine.cards import CardType
+from app.domain.combat.engine.content import BLUEPRINTS, CARDS, V4_COLS, V4_ROWS
+from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.tags import TAG_TOWER
 from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import current_stance, effective_stats, unit_tags
@@ -37,6 +39,48 @@ def _unit_payload(unit, blueprint) -> dict:
         "remaining_steps": unit.remaining_steps,
         "remaining_attacks": unit.remaining_attacks,
     }
+
+
+def _pattern_cells(pattern) -> list[dict]:
+    return [{"forward": o.forward, "col": o.col} for o in pattern.offsets]
+
+
+def v4_catalog_payload() -> list[dict]:
+    """Каталог коллекционных карт v4 для клиента (арт, статы, покрытия, зоны).
+
+    Клиент рисует по нему детальную карточку и подсветку зон спавна/покрытий
+    (размер поля и зоны — из данных, не хардкод; ARCH §5.1).
+    """
+    cards = []
+    for card in CARDS.values():
+        if not card.collectible:
+            continue
+        entry = {
+            "id": card.id,
+            "name": card.name,
+            "cost": card.cost,
+            "rarity": card.rarity.value,
+            "card_type": card.card_type.value,
+            "board": {"rows": V4_ROWS, "cols": V4_COLS},
+        }
+        if card.card_type == CardType.UNIT:
+            bp = BLUEPRINTS[card.blueprint_id]
+            entry["stats"] = {
+                "hp": bp.stats.hp,
+                "damage": bp.stats.damage,
+                "attacks_per_turn": bp.stats.attacks_per_turn,
+                "move_steps": bp.stats.move_steps,
+            }
+            entry["coverage_attack"] = _pattern_cells(bp.coverage(Stance.ATTACK))
+            entry["coverage_defense"] = _pattern_cells(bp.coverage(Stance.DEFENSE))
+            entry["spawn_rows"] = list(bp.spawn_zone.rows_from_back)
+            entry["damage_defense"] = (
+                bp.stats_defense.damage if bp.stats_defense and bp.stats_defense.damage else None
+            )
+        else:
+            entry["spell_id"] = card.spell_id
+        cards.append(entry)
+    return cards
 
 
 def v4_combat_response(

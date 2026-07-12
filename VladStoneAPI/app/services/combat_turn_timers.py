@@ -5,13 +5,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models import CombatMatchRecord
-from app.domain.combat.models import MatchLifecycleStatus, MatchState
-from app.domain.combat.rules import apply_simple_bot_turn, resolve_turn
+from app.domain.combat.engine.battle import BattleStateV4, resolve_v4_turn
+from app.domain.combat.engine.intents import PlayerIntents
+from app.domain.combat.helpers import human_players
+from app.domain.combat.models import MatchLifecycleStatus
 from app.domain.combat.timing import is_planning_deadline_expired
 from app.services.combat_matches import (
     expire_combat_match_if_outdated,
-    load_match,
-    save_match,
+    load_v4_battle,
+    save_v4_battle,
 )
 from app.services.rewards import claim_combat_reward
 
@@ -21,34 +23,33 @@ def resolve_expired_planning_match(
     record: CombatMatchRecord,
     *,
     now: datetime | None = None,
-) -> MatchState | None:
+) -> BattleStateV4 | None:
+    """Дорезолв матча с истёкшим дедлайном планирования (v4).
+
+    Ruleset-гейт сработал раньше в вызывающем коде (§8.7): сюда попадают только
+    матчи текущей версии. AFK-игрок не блокирует бой — резолвим с пустыми
+    намерениями человека (боты ходят внутри resolve_v4_turn).
+    """
+    if expire_combat_match_if_outdated(record):
+        return None
+    state = load_v4_battle(record)
     checked_at = now or datetime.now(UTC)
-    # Ruleset gate first: an old-version match must never enter the resolver,
-    # deadline or not. Returning the expired state reuses the callers' existing
-    # "state changed → commit + broadcast" path (HTTP routes, WS connect, worker).
-    outdated = expire_combat_match_if_outdated(record)
-    if outdated is not None:
-        return outdated
-    match = load_match(record)
-    if not is_planning_deadline_expired(match, now=checked_at):
+    if not is_planning_deadline_expired(state, now=checked_at):
         return None
 
-    match.events = []
-    # Fresh event stream for this turn: setup spawns below are iteration 0.
-    match.current_iteration = 0
-    match = apply_simple_bot_turn(match)
-    resolved = resolve_turn(match, now=checked_at)
-    save_match(record, resolved)
+    human = human_players(state)[0]
+    resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human.id), now=checked_at)
+    save_v4_battle(record, state)
     if record.owner_user_id is not None:
-        claim_combat_reward(db, match=resolved, user_id=record.owner_user_id)
-    return resolved
+        claim_combat_reward(db, match=state, user_id=record.owner_user_id)
+    return state
 
 
 def resolve_expired_planning_matches(
     db: Session,
     *,
     now: datetime | None = None,
-) -> list[MatchState]:
+) -> list[BattleStateV4]:
     checked_at = now or datetime.now(UTC)
     db.flush()
     records = list(
@@ -58,7 +59,7 @@ def resolve_expired_planning_matches(
             )
         )
     )
-    resolved_matches: list[MatchState] = []
+    resolved_matches: list[BattleStateV4] = []
     for record in records:
         # Commit per match: an optimistic-lock conflict on one match (someone
         # resolved it concurrently) must not discard the other resolves.
