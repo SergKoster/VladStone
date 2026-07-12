@@ -1479,6 +1479,7 @@ nav {
 }
 
 .unit-v4 {
+  container-type: inline-size;
   position: relative;
   display: grid;
   place-items: center;
@@ -1506,25 +1507,85 @@ nav {
   border-radius: 0;
 }
 
-.unit-v4-hp {
+.unit-v4-stat {
   position: absolute;
-  right: 2px;
-  bottom: 1px;
-  min-width: 15px;
-  padding: 0 3px;
-  border-radius: 6px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1em;
+  padding: 0.08em 0.28em;
+  border-radius: 999px;
   background: rgba(20, 32, 27, 0.82);
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 17cqi;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
   text-align: center;
 }
+
+.unit-v4-stat .ico {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+.unit-v4-steps {
+  left: 3%;
+  top: 3%;
+}
+.unit-v4-attacks {
+  right: 3%;
+  top: 3%;
+}
+.unit-v4-dmg {
+  left: 3%;
+  bottom: 3%;
+}
+.unit-v4-hp {
+  right: 3%;
+  bottom: 3%;
+}
+
+.unit-v4-steps .ico,
+.unit-v4-attacks .ico {
+  color: #cfe0d4;
+}
+.unit-v4-dmg .ico {
+  color: #ffb24d;
+}
+.unit-v4-hp .ico {
+  color: #ff8585;
+}
+
+.unit-v4-stance {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 3%;
+  display: grid;
+  place-items: center;
+  width: 1.45em;
+  height: 1.45em;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background: rgba(157, 61, 53, 0.9);
+  color: #fff;
+  font-size: 16cqi;
+  line-height: 1;
+}
+.unit-v4.stance-defense .unit-v4-stance {
+  background: rgba(47, 104, 163, 0.92);
+}
+
 .unit-v4-status {
   position: absolute;
-  left: 2px;
-  top: 1px;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
   padding: 0 3px;
   border-radius: 6px;
+  transform: translate(-50%, -50%);
   background: rgba(122, 60, 160, 0.9);
   color: #fff;
   font-size: 0.62rem;

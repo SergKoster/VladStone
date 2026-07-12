@@ -31,6 +31,8 @@ def _unit_payload(unit, blueprint) -> dict:
         "current_hp": unit.current_hp,
         "max_hp": stats.hp,
         "damage": stats.damage,
+        "move_steps": stats.move_steps,
+        "attacks_per_turn": stats.attacks_per_turn,
         "stance": current_stance(unit, blueprint).value,
         "is_tower": TAG_TOWER in tags,
         "statuses": [

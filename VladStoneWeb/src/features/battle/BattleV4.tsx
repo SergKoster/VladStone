@@ -12,6 +12,7 @@ import {
   startCombat,
 } from "../../api";
 import { CardArt } from "../../shared/cardArt";
+import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
 
 type Props = {
@@ -335,7 +336,29 @@ function UnitToken({
       <span className="unit-v4-art">
         <CardArt cardId={unit.card_id ?? ""} label={card?.name ?? "?"} rarity="common" />
       </span>
-      <span className="unit-v4-hp">{Math.max(0, unit.current_hp)}</span>
+      <span className="unit-v4-stat unit-v4-steps" title="Шаги за ход">
+        <BootIcon />
+        {unit.move_steps}
+      </span>
+      <span className="unit-v4-stat unit-v4-attacks" title="Атаки за ход">
+        <SwordIcon />
+        {unit.attacks_per_turn}
+      </span>
+      <span className="unit-v4-stat unit-v4-dmg" title="Урон">
+        <BurstIcon />
+        {unit.damage}
+      </span>
+      <span className="unit-v4-stat unit-v4-hp" title="Здоровье">
+        <HeartIcon />
+        {Math.max(0, unit.current_hp)}/{unit.max_hp}
+      </span>
+      <span
+        aria-label={unit.stance === "defense" ? "Стойка: защита" : "Стойка: атака"}
+        className="unit-v4-stance"
+        title={unit.stance === "defense" ? "Защита" : "Атака"}
+      >
+        <span aria-hidden="true">{unit.stance === "defense" ? "🛡" : "⚔"}</span>
+      </span>
       {unit.statuses.length > 0 ? (
         <span className="unit-v4-status">{unit.statuses.map((s) => s.stacks).join("·")}</span>
       ) : null}

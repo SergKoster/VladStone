@@ -51,6 +51,8 @@ export type CombatUnit = {
   current_hp: number;
   max_hp: number;
   damage: number;
+  move_steps: number;
+  attacks_per_turn: number;
   stance: CombatStance;
   is_tower: boolean;
   statuses: CombatUnitStatus[];
