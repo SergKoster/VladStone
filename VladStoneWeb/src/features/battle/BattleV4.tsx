@@ -124,7 +124,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
   function isValidTarget(card: CombatCatalogCard, row: number, col: number): boolean {
     if (col < 0 || col >= cols) return false;
-    if (card.card_type === "spell") return true; // спелл таргетит любую клетку поля
+    if (card.card_type === "spell") return unitAt(row, col) != null;
     if (!spawnRowsFor(card).includes(row)) return false;
     return !unitAt(row, col) && !plannedAt(row, col);
   }
