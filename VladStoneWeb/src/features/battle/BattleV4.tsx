@@ -393,6 +393,29 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                   <CardArt cardId={cardId} label={card?.name ?? cardId} rarity="common" />
                 </span>
                 <span className="hand-card-name">{card?.name ?? cardId}</span>
+                {/* Характеристики видны ВСЕГДА (описание-механика — отдельно, тултип). */}
+                {card?.stats ? (
+                  <span className="hand-card-stats">
+                    <span title="Здоровье">
+                      <HeartIcon />
+                      {card.stats.hp}
+                    </span>
+                    <span title="Урон">
+                      <BurstIcon />
+                      {card.stats.damage}
+                    </span>
+                    <span title="Атаки за ход">
+                      <SwordIcon />
+                      {card.stats.attacks_per_turn}
+                    </span>
+                    <span title="Шаги за ход">
+                      <BootIcon />
+                      {card.stats.move_steps}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="hand-card-stats spell">заклинание</span>
+                )}
                 <span className="hand-card-cost">{card?.cost ?? "?"}</span>
               </button>
             );

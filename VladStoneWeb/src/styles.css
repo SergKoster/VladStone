@@ -1487,13 +1487,11 @@ nav {
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 0 0 2px #2d5f4d;
+  /* Обводка = сторона (свой/чужой), НЕ стойка. Стойка — иконкой внизу (W3). */
+  box-shadow: 0 0 0 2px #2d9d5f;
 }
 .unit-v4.top {
-  box-shadow: 0 0 0 2px #9d3d35;
-}
-.unit-v4.stance-defense {
-  box-shadow: 0 0 0 2px #2f68a3;
+  box-shadow: 0 0 0 2px #d0443c;
 }
 
 .unit-v4-art {
@@ -1648,6 +1646,8 @@ nav {
   /* Тач-драг карты не должен скроллить страницу — жест забираем себе. */
   touch-action: none;
   user-select: none;
+  /* Имя/статы не должны вылезать за карту (W2). */
+  overflow: hidden;
 }
 .hand-card-v4:active:not(:disabled) {
   cursor: grabbing;
@@ -1699,6 +1699,39 @@ nav {
   color: #21372f;
   line-height: 1.05;
   text-align: center;
+  /* W2: длинное имя (СамурайKoster) обрезаем многоточием, не даём вылезти. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Характеристики карты — видны ВСЕГДА (описание-механика — отдельный тултип). */
+.hand-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 4px;
+  justify-items: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #2f4038;
+}
+.hand-card-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.hand-card-stats .ico {
+  width: 10px;
+  height: 10px;
+}
+.hand-card-stats.spell {
+  display: block;
+  text-align: center;
+  color: #8a4bc0;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 .hand-card-cost {
   position: absolute;
