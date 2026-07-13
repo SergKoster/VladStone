@@ -1706,15 +1706,23 @@ nav {
   text-overflow: ellipsis;
 }
 
-/* Характеристики карты — видны ВСЕГДА (описание-механика — отдельный тултип). */
+/* Характеристики карты — видны ВСЕГДА (описание-механика — отдельный тултип).
+   Читаемая плашка-подложка + жирный тёмный текст: без неё мелкие иконки
+   сливались с картой (W1-visibility). */
 .hand-card-stats {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 4px;
+  gap: 1px 5px;
   justify-items: center;
-  font-size: 0.62rem;
+  padding: 2px 3px;
+  border-radius: 6px;
+  background: #eef3ef;
+  color: #16201b;
+  font-size: 0.7rem;
   font-weight: 800;
-  color: #2f4038;
+  line-height: 1.1;
 }
 .hand-card-stats > span {
   display: inline-flex;
@@ -1722,13 +1730,15 @@ nav {
   gap: 2px;
 }
 .hand-card-stats .ico {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
+  flex: none;
 }
 .hand-card-stats.spell {
   display: block;
   text-align: center;
-  color: #8a4bc0;
+  color: #6a3a94;
+  background: #f0e9f6;
   font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
