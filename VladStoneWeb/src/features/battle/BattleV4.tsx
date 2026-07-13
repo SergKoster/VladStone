@@ -262,9 +262,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setSelected(null);
       if (res.match.result.status !== "active") onBattleFinished();
     } catch {
-      // Deadline passed or already resolved — refetch the authoritative state.
+      // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
+      // подтягиваем авторитетное состояние И чистим планы — они были для
+      // прошлого хода, иначе «залипают» на поле поверх нового хода (W5).
       const fresh = await getCombat(match.id).catch(() => null);
       if (fresh) setMatch(fresh.match);
+      setPlanned([]);
+      setSelected(null);
     } finally {
       setBusy(false);
     }
