@@ -1644,7 +1644,31 @@ nav {
   border: 1px solid #cfdbd3;
   border-radius: 10px;
   background: #fbfcfa;
-  cursor: pointer;
+  cursor: grab;
+  /* Тач-драг карты не должен скроллить страницу — жест забираем себе. */
+  touch-action: none;
+  user-select: none;
+}
+.hand-card-v4:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+/* Призрак карты под курсором во время перетаскивания (не мешает hit-test'у). */
+.card-drag-ghost {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, -120%);
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(45, 95, 77, 0.94);
+  color: #f8faf6;
+  font-size: 0.72rem;
+  font-weight: 800;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(20, 32, 27, 0.4);
+}
+.card-drag-ghost.valid {
+  background: rgba(63, 157, 95, 0.96);
 }
 .hand-card-v4.active {
   border-color: #2f7fd0;

@@ -25,6 +25,8 @@ type PlannedSpell = { kind: "spell"; card_id: string; row: number; col: number }
 type Planned = PlannedUnit | PlannedSpell;
 
 const TURN_SECONDS = 30;
+// Пикселей до превращения нажатия на карту в перетаскивание (ниже — тап-выбор).
+const DRAG_THRESHOLD = 6;
 
 export function BattleV4({ cards, onBattleFinished }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
@@ -35,6 +37,22 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const [resultDismissed, setResultDismissed] = React.useState(false);
   const [realtime, setRealtime] = React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const [secondsLeft, setSecondsLeft] = React.useState(TURN_SECONDS);
+  // Перетаскивание карты руки на клетку (pointer events — мышь и тач одним путём).
+  const dragRef = React.useRef<{
+    cardId: string;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null>(null);
+  // Глотает click, который браузер синтезирует после pointerup (чтобы драг/тап
+  // не сработали дважды через onClick).
+  const suppressClickRef = React.useRef(false);
+  const [dragGhost, setDragGhost] = React.useState<{
+    x: number;
+    y: number;
+    valid: boolean;
+    name: string;
+  } | null>(null);
   const autoSubmittedDeadline = React.useRef<string | null>(null);
 
   const viewer = match?.players.find((p) => p.id === match.viewer_id) ?? null;
@@ -130,22 +148,102 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     return !unitAt(row, col) && !plannedAt(row, col);
   }
 
-  function handleCellClick(row: number, col: number) {
-    if (!selected || busy || isFinished) return;
-    const card = catalog.get(selected);
-    if (!card) return;
-    if (plannedCost + card.cost > (viewer?.mana ?? 0)) return;
-    if (!isValidTarget(card, row, col)) return;
+  // Общая точка размещения — и клик-путь, и drag-n-drop идут через неё
+  // (одинаковые проверки маны/зоны/занятости). true — карта запланирована.
+  function placeCard(cardId: string, row: number, col: number): boolean {
+    if (busy || isFinished) return false;
+    const card = catalog.get(cardId);
+    if (!card) return false;
+    if (plannedCost + card.cost > (viewer?.mana ?? 0)) return false;
+    if (!isValidTarget(card, row, col)) return false;
     setPlanned((cur) => [
       ...cur,
       card.card_type === "spell"
         ? { kind: "spell", card_id: card.id, row, col }
         : { kind: "unit", card_id: card.id, row, col },
     ]);
-    // If no more copies of this card remain in hand after planning, deselect.
-    const inHand = (viewer?.hand ?? []).filter((c) => c === card.id).length;
-    const plannedSame = planned.filter((p) => p.card_id === card.id).length + 1;
+    // Если копий этой карты в руке больше не осталось — снять выбор.
+    const inHand = (viewer?.hand ?? []).filter((c) => c === cardId).length;
+    const plannedSame = planned.filter((p) => p.card_id === cardId).length + 1;
     if (plannedSame >= inHand) setSelected(null);
+    return true;
+  }
+
+  function handleCellClick(row: number, col: number) {
+    if (selected) placeCard(selected, row, col);
+  }
+
+  // Клетка под указателем — по elementFromPoint + data-атрибутам. Координаты
+  // мерим ЖИВЬЁМ на каждом move: страница может проскроллиться / сервер
+  // дорезолвит ход по таймеру, заранее снятые координаты устаревают.
+  function cellFromPoint(x: number, y: number): { row: number; col: number } | null {
+    const el = document.elementFromPoint(x, y)?.closest(".cell-v4");
+    if (!el) return null;
+    const row = Number(el.getAttribute("data-row"));
+    const col = Number(el.getAttribute("data-col"));
+    return Number.isNaN(row) || Number.isNaN(col) ? null : { row, col };
+  }
+
+  function handleCardPointerDown(e: React.PointerEvent, cardId: string) {
+    if (busy || isFinished) return;
+    // Начало нового взаимодействия сбрасывает подавление: настоящий драг мыши
+    // может не породить финальный click, и застрявший флаг съел бы следующий.
+    suppressClickRef.current = false;
+    dragRef.current = { cardId, startX: e.clientX, startY: e.clientY, dragging: false };
+    // Держим move/up на карте даже после ухода указателя за её пределы.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Некоторые окружения отклоняют capture на синтетических указателях — не фатально.
+    }
+  }
+
+  function handleCardPointerMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
+    if (!d.dragging && dist < DRAG_THRESHOLD) return; // ещё тап, не драг
+    if (!d.dragging) {
+      d.dragging = true;
+      setSelected(d.cardId); // выбор включает подсветку валидных клеток (.ok)
+    }
+    const cell = cellFromPoint(e.clientX, e.clientY);
+    const card = catalog.get(d.cardId);
+    const valid = Boolean(
+      cell &&
+        card &&
+        plannedCost + card.cost <= (viewer?.mana ?? 0) &&
+        isValidTarget(card, cell.row, cell.col),
+    );
+    setDragGhost({ x: e.clientX, y: e.clientY, valid, name: card?.name ?? d.cardId });
+  }
+
+  function handleCardPointerUp(e: React.PointerEvent) {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDragGhost(null);
+    if (!d) return;
+    suppressClickRef.current = true; // click после pointerup не должен сработать
+    if (d.dragging) {
+      const cell = cellFromPoint(e.clientX, e.clientY);
+      if (cell) placeCard(d.cardId, cell.row, cell.col);
+    } else {
+      setSelected((s) => (s === d.cardId ? null : d.cardId)); // тап — выбор/снятие
+    }
+  }
+
+  function handleCardPointerCancel() {
+    dragRef.current = null;
+    setDragGhost(null);
+  }
+
+  function handleCardClick(cardId: string) {
+    // Только клавиатурный/несенсорный путь: тач/мышь обслуживает pointerup.
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setSelected((s) => (s === cardId ? null : cardId));
   }
 
   async function handleResolve() {
@@ -199,6 +297,15 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
   return (
     <div className="battle-v4">
+      {dragGhost ? (
+        <div
+          aria-hidden
+          className={`card-drag-ghost${dragGhost.valid ? " valid" : ""}`}
+          style={{ left: dragGhost.x, top: dragGhost.y }}
+        >
+          {dragGhost.name}
+        </div>
+      ) : null}
       <section className="battle-stage">
         <div className="battle-topbar">
           <button className="ghost-btn" disabled={busy} onClick={handleStart}>
@@ -224,6 +331,8 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
               <button
                 key={i}
                 className={`cell-v4${highlight ? " ok" : ""}`}
+                data-row={row}
+                data-col={col}
                 onClick={() => handleCellClick(row, col)}
               >
                 {unit ? <UnitToken unit={unit} catalog={catalog} /> : null}
@@ -274,7 +383,11 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                   .filter(Boolean)
                   .join(" ")}
                 disabled={busy || isFinished || isPlanned || (!affordable && !isPlanned)}
-                onClick={() => setSelected((s) => (s === cardId ? null : cardId))}
+                onClick={() => handleCardClick(cardId)}
+                onPointerDown={(e) => handleCardPointerDown(e, cardId)}
+                onPointerMove={handleCardPointerMove}
+                onPointerUp={handleCardPointerUp}
+                onPointerCancel={handleCardPointerCancel}
               >
                 <span className="hand-card-art">
                   <CardArt cardId={cardId} label={card?.name ?? cardId} rarity="common" />
@@ -349,8 +462,10 @@ function UnitToken({
         {unit.damage}
       </span>
       <span className="unit-v4-stat unit-v4-hp" title="Здоровье">
+        {/* Только текущее HP: потолка нет (Q4), лечение может поднять выше
+            базы, и "6/2" читалось бы как поломка. Максимум/база — в карточке. */}
         <HeartIcon />
-        {Math.max(0, unit.current_hp)}/{unit.max_hp}
+        {Math.max(0, unit.current_hp)}
       </span>
       <span
         aria-label={unit.stance === "defense" ? "Стойка: защита" : "Стойка: атака"}
