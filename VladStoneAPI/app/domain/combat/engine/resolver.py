@@ -29,6 +29,7 @@ from app.domain.combat.engine.apply import (
     HAND_CAP,
     EffectContext,
     EngineEvent,
+    affected_cells,
     apply_effect,
     board_snapshot,
     select_targets,
@@ -163,7 +164,25 @@ def _cast_spell(ctx: EffectContext, player: PlayerState, intent: SpellIntent):
 
     player.hand.remove(intent.card_id)
     player.mana -= card.cost
-    events = [_event(ctx, kind="spell_cast", player_id=player.id, card_id=card.id)]
+    visual_cells = sorted(
+        {
+            cell
+            for action in script.actions
+            for cell in affected_cells(
+                action.target, ctx, caster_side=player.side, origin=origin
+            )
+        }
+    )
+    events = [
+        _event(
+            ctx,
+            kind="spell_cast",
+            player_id=player.id,
+            card_id=card.id,
+            to_cell=origin,
+            affected_cells=visual_cells,
+        )
+    ]
     for action in script.actions:
         targets = select_targets(action.target, ctx, caster_side=player.side, origin=origin)
         events += apply_effect(
@@ -230,6 +249,12 @@ def _fire_abilities(ctx: EffectContext, unit: UnitState, trigger: TriggerHook):
     for ability in blueprint.abilities:
         if ability.trigger != trigger:
             continue
+        visual_cells = affected_cells(
+            ability.target,
+            ctx,
+            caster_side=unit.side,
+            origin=(unit.row, unit.col),
+        )
         events.append(
             _event(
                 ctx,
@@ -237,6 +262,7 @@ def _fire_abilities(ctx: EffectContext, unit: UnitState, trigger: TriggerHook):
                 unit_id=unit.id,
                 trigger=trigger.value,
                 from_cell=(unit.row, unit.col),
+                affected_cells=visual_cells,
             )
         )
         targets = select_targets(

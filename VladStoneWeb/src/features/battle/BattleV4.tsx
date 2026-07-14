@@ -13,6 +13,19 @@ import {
 } from "../../api";
 import { CardArt } from "../../shared/cardArt";
 import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
+import {
+  AREA_PULSE_MS,
+  DEATH_FADE_MS,
+  LUNGE_MS,
+  MOVE_MS,
+  POPUP_TTL_MS,
+  SPAWN_MS,
+} from "./animationConfig";
+import {
+  type BattlePopup,
+  type CellPulse,
+  type LungeEffect,
+} from "./battleAnimations";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
 import { useTurnPlayback } from "./useTurnPlayback";
 
@@ -38,7 +51,17 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const [resultDismissed, setResultDismissed] = React.useState(false);
   const [realtime, setRealtime] = React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const [secondsLeft, setSecondsLeft] = React.useState(TURN_SECONDS);
-  const { animatedMatch, isAnimating, playTurn } = useTurnPlayback();
+  const {
+    activeEvent,
+    animatedMatch,
+    cellPulses,
+    dyingIds,
+    isAnimating,
+    lunges,
+    playTurn,
+    popups,
+    spawningIds,
+  } = useTurnPlayback();
   // Синхронный флаг для WS-обработчика: React-state обновляется не сразу, а
   // echo собственного resolve может прилететь раньше HTTP-ответа и показать
   // финальное поле перед запуском плеера.
@@ -335,6 +358,20 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     );
   }
   const visibleMatch = renderedMatch ?? match;
+  const lungeByUnit = new Map(lunges.map((lunge) => [lunge.unitId, lunge]));
+  const visibleUnits = visibleMatch.units
+    .filter((unit) => !unit.is_tower)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const boardStyle = {
+    ["--area-pulse-ms" as string]: `${AREA_PULSE_MS}ms`,
+    ["--cols" as string]: cols,
+    ["--death-ms" as string]: `${DEATH_FADE_MS}ms`,
+    ["--move-ms" as string]: `${MOVE_MS}ms`,
+    ["--popup-ms" as string]: `${POPUP_TTL_MS}ms`,
+    ["--rows" as string]: rows,
+    ["--spawn-ms" as string]: `${SPAWN_MS}ms`,
+    ["--strike-ms" as string]: `${LUNGE_MS}ms`,
+  } as React.CSSProperties;
 
   return (
     <div className="battle-v4">
@@ -357,35 +394,53 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
         <TowerRow label="Башни врага" towers={towersOf(enemy?.side ?? "top")} />
 
-        <div
-          className="board-v4"
-          style={{ ["--cols" as string]: cols, ["--rows" as string]: rows } as React.CSSProperties}
-        >
-          {Array.from({ length: rows * cols }, (_, i) => {
-            const row = Math.floor(i / cols);
-            const col = i % cols;
-            const unit = unitAt(row, col);
-            const plan = plannedAt(row, col);
-            const card = selected ? catalog.get(selected) : null;
-            const highlight = card && isValidTarget(card, row, col);
-            return (
-              <button
-                key={i}
-                className={`cell-v4${highlight ? " ok" : ""}`}
-                data-row={row}
-                data-col={col}
-                disabled={busy || isAnimating || isFinished}
-                onClick={() => handleCellClick(row, col)}
-              >
-                {unit ? <UnitToken unit={unit} catalog={catalog} /> : null}
-                {plan && !unit ? (
-                  <span className={`plan-mark ${plan.kind}`}>
-                    {catalog.get(plan.card_id)?.name ?? plan.card_id}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+        <div className="board-v4-wrap" style={boardStyle}>
+          <div className="board-v4">
+            {Array.from({ length: rows * cols }, (_, i) => {
+              const row = Math.floor(i / cols);
+              const col = i % cols;
+              const unit = unitAt(row, col);
+              const plan = plannedAt(row, col);
+              const card = selected ? catalog.get(selected) : null;
+              const highlight = card && isValidTarget(card, row, col);
+              return (
+                <button
+                  key={i}
+                  className={`cell-v4${highlight ? " ok" : ""}`}
+                  data-row={row}
+                  data-col={col}
+                  disabled={busy || isAnimating || isFinished}
+                  onClick={() => handleCellClick(row, col)}
+                >
+                  {plan && !unit ? (
+                    <span className={`plan-mark ${plan.kind}`}>
+                      {catalog.get(plan.card_id)?.name ?? plan.card_id}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className="unit-layer unit-layer-v4" aria-live="polite">
+            {cellPulses.map((pulse) => (
+              <CellPulseView key={pulse.key} pulse={pulse} />
+            ))}
+            {visibleUnits.map((unit) => (
+              <UnitToken
+                key={unit.id}
+                acting={activeEvent?.actor_id === unit.id}
+                catalog={catalog}
+                dying={dyingIds.includes(unit.id)}
+                lunge={lungeByUnit.get(unit.id)}
+                spawning={spawningIds.includes(unit.id)}
+                targeted={activeEvent?.target_id === unit.id}
+                unit={unit}
+              />
+            ))}
+            {popups.map((popup) => (
+              <DamagePopupView key={popup.key} popup={popup} />
+            ))}
+          </div>
         </div>
 
         <TowerRow label="Твои башни" towers={towersOf(viewer?.side ?? "bottom")} />
@@ -510,47 +565,135 @@ function TowerRow({ label, towers }: { label: string; towers: CombatUnit[] }) {
 }
 
 function UnitToken({
+  acting,
   unit,
   catalog,
+  dying,
+  lunge,
+  spawning,
+  targeted,
 }: {
+  acting: boolean;
   unit: CombatUnit;
   catalog: Map<string, CombatCatalogCard>;
+  dying: boolean;
+  lunge?: LungeEffect;
+  spawning: boolean;
+  targeted: boolean;
 }) {
   const card = unit.card_id ? catalog.get(unit.card_id) : null;
   return (
-    <span className={`unit-v4 ${unit.side} stance-${unit.stance}`}>
-      <span className="unit-v4-art">
-        <CardArt cardId={unit.card_id ?? ""} label={card?.name ?? "?"} rarity="common" />
-      </span>
-      <span className="unit-v4-stat unit-v4-steps" title="Шаги за ход">
-        <BootIcon />
-        {unit.move_steps}
-      </span>
-      <span className="unit-v4-stat unit-v4-attacks" title="Атаки за ход">
-        <SwordIcon />
-        {unit.attacks_per_turn}
-      </span>
-      <span className="unit-v4-stat unit-v4-dmg" title="Урон">
-        <BurstIcon />
-        {unit.damage}
-      </span>
-      <span className="unit-v4-stat unit-v4-hp" title="Здоровье">
-        {/* Только текущее HP: потолка нет (Q4), лечение может поднять выше
-            базы, и "6/2" читалось бы как поломка. Максимум/база — в карточке. */}
-        <HeartIcon />
-        {Math.max(0, unit.current_hp)}
-      </span>
+    <span
+      className={[
+        "unit-token",
+        "unit-token-v4",
+        lunge ? "lunging" : "",
+        dying ? "dying" : "",
+        spawning ? "spawning" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-unit-id={unit.id}
+      style={
+        {
+          ["--col" as string]: unit.col,
+          ["--row" as string]: unit.row,
+        } as React.CSSProperties
+      }
+    >
       <span
-        aria-label={unit.stance === "defense" ? "Стойка: защита" : "Стойка: атака"}
-        className="unit-v4-stance"
-        title={unit.stance === "defense" ? "Защита" : "Атака"}
+        className={`unit-token-inner${lunge ? " striking" : ""}`}
+        style={
+          lunge
+            ? ({
+                ["--lunge-x" as string]: `${lunge.dx}%`,
+                ["--lunge-y" as string]: `${lunge.dy}%`,
+              } as React.CSSProperties)
+            : undefined
+        }
       >
-        <span aria-hidden="true">{unit.stance === "defense" ? "🛡" : "⚔"}</span>
+        <span
+          className={[
+            "unit-v4",
+            unit.side,
+            `stance-${unit.stance}`,
+            acting ? "acting" : "",
+            targeted ? "targeted" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          <span className="unit-v4-art">
+            <CardArt cardId={unit.card_id ?? ""} label={card?.name ?? "?"} rarity="common" />
+          </span>
+          <span className="unit-v4-stat unit-v4-steps" title="Шаги за ход">
+            <BootIcon />
+            {unit.move_steps}
+          </span>
+          <span className="unit-v4-stat unit-v4-attacks" title="Атаки за ход">
+            <SwordIcon />
+            {unit.attacks_per_turn}
+          </span>
+          <span className="unit-v4-stat unit-v4-dmg" title="Урон">
+            <BurstIcon />
+            {unit.damage}
+          </span>
+          <span className="unit-v4-stat unit-v4-hp" title="Здоровье">
+            {/* Только текущее HP: потолка нет (Q4), лечение может поднять выше
+                базы, и "6/2" читалось бы как поломка. Максимум/база — в карточке. */}
+            <HeartIcon />
+            {Math.max(0, unit.current_hp)}
+          </span>
+          <span
+            aria-label={unit.stance === "defense" ? "Стойка: защита" : "Стойка: атака"}
+            className="unit-v4-stance"
+            title={unit.stance === "defense" ? "Защита" : "Атака"}
+          >
+            <span aria-hidden="true">{unit.stance === "defense" ? "🛡" : "⚔"}</span>
+          </span>
+          {unit.statuses.length > 0 ? (
+            <span className="unit-v4-status">
+              {unit.statuses.map((s) => s.stacks).join("·")}
+            </span>
+          ) : null}
+        </span>
       </span>
-      {unit.statuses.length > 0 ? (
-        <span className="unit-v4-status">{unit.statuses.map((s) => s.stacks).join("·")}</span>
-      ) : null}
     </span>
+  );
+}
+
+function DamagePopupView({ popup }: { popup: BattlePopup }) {
+  return (
+    <span
+      className={`damage-popup ${popup.kind}`}
+      style={
+        {
+          ["--col" as string]: popup.col,
+          ["--row" as string]: popup.row,
+        } as React.CSSProperties
+      }
+    >
+      {popup.kind === "damage" ? <BurstIcon /> : <HeartIcon />}
+      <span className="damage-popup-text">
+        {popup.kind === "damage" ? "−" : "+"}
+        {popup.amount}
+      </span>
+    </span>
+  );
+}
+
+function CellPulseView({ pulse }: { pulse: CellPulse }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="cell-effect-pulse"
+      style={
+        {
+          ["--col" as string]: pulse.col,
+          ["--row" as string]: pulse.row,
+        } as React.CSSProperties
+      }
+    />
   );
 }
 

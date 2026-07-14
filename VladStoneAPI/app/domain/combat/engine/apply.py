@@ -108,6 +108,9 @@ class EngineEvent(BaseModel):
     # Проставляются резолвером: фаза хода и номер итерации внутри фазы 4.
     phase: str | None = None
     iteration: int | None = None
+    # Полная область визуального эффекта (включая пустые клетки). Это только
+    # наблюдаемость для клиента: правила и выбор реальных целей не меняет.
+    affected_cells: list[tuple[int, int]] = Field(default_factory=list)
     snapshot: dict = Field(default_factory=dict)
 
 
@@ -230,6 +233,34 @@ def select_targets(
             continue
         result.append(unit)
     return sorted(result, key=lambda unit: (unit.row, unit.col))
+
+
+def affected_cells(
+    selector: TargetSelector,
+    ctx: EffectContext,
+    *,
+    caster_side: PlayerSide,
+    origin: tuple[int, int] | None = None,
+) -> list[tuple[int, int]]:
+    """Клетки области эффекта для клиентской анимации, включая пустые."""
+    if selector.scope == "board":
+        return [(row, col) for row in range(ctx.rows) for col in range(ctx.cols)]
+    if origin is None:
+        return []
+    if selector.scope in ("cell", "self"):
+        cells = [origin]
+    else:
+        assert selector.pattern is not None
+        cells = selector.pattern.resolve(
+            row=origin[0],
+            col=origin[1],
+            side=caster_side,
+            rows=ctx.rows,
+            cols=ctx.cols,
+        )
+    # Башни живут на призрачных рядах -1/rows, но клеточный overlay рисуется
+    # только над самим полем.
+    return sorted((row, col) for row, col in cells if 0 <= row < ctx.rows)
 
 
 def apply_effect(

@@ -245,6 +245,11 @@ def test_c1_spell_order_alternates_by_turn() -> None:
         )
         casts = [event.player_id for event in events if event.kind == "spell_cast"]
         assert casts == expected, f"turn {turn}"
+        assert all(
+            event.affected_cells == [(2, 2)]
+            for event in events
+            if event.kind == "spell_cast"
+        )
 
 
 def test_c1_death_wave_runs_between_players_subphases() -> None:
@@ -535,6 +540,8 @@ def test_c5_death_wave_cascades_through_on_death_bombs() -> None:
     # Болт убил A; волна 1: A взрывается → B в минусе; волна 2: B взрывается →
     # C в минусе; волна 3: C. Каскад в одной спелл-под-фазе.
     assert died == [a.id, b.id, c.id]
+    triggered = [event for event in events if event.kind == "ability_triggered"]
+    assert triggered[0].affected_cells == [(0, 1), (2, 1)]
     assert unit_ids(ctx) == set()
 
 

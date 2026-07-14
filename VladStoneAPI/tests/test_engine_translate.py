@@ -38,6 +38,7 @@ def test_attack_fact_maps_to_full_animation_contract() -> None:
         to_cell=(1, 1),
         phase="iterations",
         iteration=2,
+        affected_cells=[(2, 0), (2, 1)],
         snapshot=snapshot,
     )
     [event] = translate_engine_events([fact], sequence_start=7)
@@ -47,6 +48,7 @@ def test_attack_fact_maps_to_full_animation_contract() -> None:
     assert event.from_position == Position(row=3, col=1)
     assert event.to_position == Position(row=1, col=1)
     assert event.sequence == 7 and event.micro_step == 2 and event.phase == "iterations"
+    assert event.affected_cells == [Position(row=2, col=0), Position(row=2, col=1)]
     assert event.snapshot == snapshot
 
 

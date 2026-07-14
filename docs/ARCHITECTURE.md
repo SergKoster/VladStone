@@ -67,7 +67,10 @@
 
 **Контракт combat events** (основа клиентских анимаций):
 `type, actor_id, target_id, target_kind, damage, from/to_position,
-before_hp/after_hp, sequence, micro_step, snapshot{players,units}`.
+before_hp/after_hp, sequence, micro_step, affected_cells,
+snapshot{players,units}`. `affected_cells` — полная визуальная область события
+на поле, включая пустые клетки; её вычисляет сервер из того же selector, что и
+реальные цели, а клиент только отображает.
 `sequence` — сквозной номер события в ходе (уникальный, строго растёт).
 `micro_step` — номер итерации резолвера (микрохода): спавны сетапа = 0,
 микроходы = 1, 2, 3…; повторяется у всех событий одной итерации. Клиент по нему

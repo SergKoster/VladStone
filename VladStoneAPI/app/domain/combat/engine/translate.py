@@ -63,6 +63,7 @@ def translate_engine_events(
                 # как в MVP-контракте); фаза уходит отдельным полем.
                 micro_step=fact.iteration or 0,
                 phase=fact.phase,
+                affected_cells=[Position(row=row, col=col) for row, col in fact.affected_cells],
                 snapshot=fact.snapshot,
             )
         )

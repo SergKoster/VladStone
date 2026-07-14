@@ -498,7 +498,7 @@ nav {
 
 .unit-token.dying .unit-token-inner {
   transform-origin: center;
-  animation: unit-die var(--move-ms, 340ms) ease forwards;
+  animation: unit-die var(--death-ms, var(--move-ms, 340ms)) ease forwards;
 }
 
 @keyframes unit-die {
@@ -531,7 +531,7 @@ nav {
   text-shadow:
     0 1px 2px rgb(248 250 246 / 0.9),
     0 0 2px rgb(248 250 246 / 0.9);
-  animation: damage-float 900ms ease-out forwards;
+  animation: damage-float var(--popup-ms, 900ms) ease-out forwards;
 }
 
 .damage-popup.hero .damage-popup-text {
@@ -1441,12 +1441,51 @@ nav {
   font-size: 0.72rem;
 }
 
+.board-v4-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--cols) / var(--rows);
+}
+
 .board-v4 {
   display: grid;
   grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
   gap: 5px;
-  aspect-ratio: var(--cols) / var(--rows);
   width: 100%;
+  height: 100%;
+}
+
+.unit-layer-v4 {
+  --gap: 5px;
+}
+
+.unit-layer-v4 .unit-token {
+  z-index: 2;
+}
+
+.unit-layer-v4 .unit-token-inner {
+  display: grid;
+  place-items: center;
+}
+
+.unit-layer-v4 .unit-token.spawning .unit-token-inner {
+  animation: unit-spawn var(--spawn-ms, 360ms) cubic-bezier(0.22, 0.9, 0.32, 1) both;
+}
+
+@keyframes unit-spawn {
+  0% {
+    opacity: 0;
+    transform: translateY(18%) scale(0.55);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(-4%) scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .cell-v4 {
@@ -1488,8 +1527,8 @@ nav {
   position: relative;
   display: grid;
   place-items: center;
-  width: 92%;
-  aspect-ratio: 1;
+  width: 100%;
+  height: 100%;
   border-radius: 8px;
   overflow: hidden;
   /* Обводка = сторона (свой/чужой), НЕ стойка. Стойка — иконкой внизу (W3). */
@@ -1497,6 +1536,89 @@ nav {
 }
 .unit-v4.top {
   box-shadow: 0 0 0 2px #d0443c;
+}
+
+.unit-v4.acting {
+  filter: brightness(1.12) saturate(1.08);
+}
+
+.unit-v4.targeted {
+  animation: unit-targeted 420ms ease-out;
+}
+
+@keyframes unit-targeted {
+  45% {
+    filter: brightness(1.28) saturate(1.35);
+    box-shadow:
+      0 0 0 3px #ffb24d,
+      0 0 14px rgb(255 122 47 / 0.85);
+  }
+}
+
+.unit-layer-v4 .damage-popup {
+  grid-template-columns: auto auto;
+  gap: 0.12rem;
+  justify-content: center;
+}
+
+.unit-layer-v4 .damage-popup > .ico {
+  z-index: 1;
+  width: clamp(1.2rem, 4vw, 2rem);
+  height: clamp(1.2rem, 4vw, 2rem);
+  color: #ff6c39;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.28));
+  animation: burst-pop 600ms ease-out forwards;
+}
+
+.unit-layer-v4 .damage-popup.heal > .ico,
+.unit-layer-v4 .damage-popup.heal .damage-popup-text {
+  color: #2d9d5f;
+}
+
+.cell-effect-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  border-radius: 8px;
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  background: rgb(201 54 47 / 0.38);
+  box-shadow:
+    inset 0 0 0 2px rgb(180 42 38 / 0.42),
+    0 0 12px rgb(201 54 47 / 0.32);
+  animation: cell-effect-wave var(--area-pulse-ms, 680ms) ease-out forwards;
+}
+
+@keyframes cell-effect-wave {
+  0% {
+    opacity: 0;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(0.76);
+  }
+  32% {
+    opacity: 1;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(1.04);
+  }
 }
 
 .unit-v4-art {

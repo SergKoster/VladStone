@@ -39,6 +39,24 @@ export function applySnapshot(
   };
 }
 
+/** Применить кадр события и точное after_hp даже если цель уже выпала из снапшота. */
+export function applyEventSnapshot(
+  match: CombatMatch,
+  event: CombatEvent,
+  fallbackUnits: CombatUnit[] = [],
+): CombatMatch {
+  const next = applySnapshot(match, event.snapshot, fallbackUnits);
+  const hpUnitId = event.target_id ?? (event.type === "death" ? event.actor_id : null);
+  const afterHp = event.after_hp;
+  if (!hpUnitId || afterHp === null) return next;
+  return {
+    ...next,
+    units: next.units.map((unit) =>
+      unit.id === hpUnitId ? { ...unit, current_hp: afterHp } : unit,
+    ),
+  };
+}
+
 function compareUnitIds(a: CombatUnit, b: CombatUnit): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
