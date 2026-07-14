@@ -9,4 +9,5 @@ export const LUNGE_IMPACT_MS = 235;
 export const DEATH_FADE_MS = 420;
 export const POPUP_TTL_MS = 900;
 export const AREA_PULSE_MS = 680;
+export const PHASE_OVERLAY_FADE_MS = 220;
 export const WATCHDOG_MS = 8_000;

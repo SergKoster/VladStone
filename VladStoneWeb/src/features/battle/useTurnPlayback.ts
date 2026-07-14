@@ -25,6 +25,7 @@ import { applyEventSnapshot, groupKey } from "./turnPlayback";
 export function useTurnPlayback() {
   const [animatedMatch, setAnimatedMatch] = React.useState<CombatMatch | null>(null);
   const [activeEvent, setActiveEvent] = React.useState<CombatEvent | null>(null);
+  const [phaseEvent, setPhaseEvent] = React.useState<CombatEvent | null>(null);
   const [isAnimating, setIsAnimating] = React.useState(false);
   const [lunges, setLunges] = React.useState<LungeEffect[]>([]);
   const [popups, setPopups] = React.useState<BattlePopup[]>([]);
@@ -86,6 +87,7 @@ export function useTurnPlayback() {
         isPlayingRef.current = false;
         setAnimatedMatch(finalMatch);
         setActiveEvent(null);
+        setPhaseEvent(null);
         setLunges([]);
         setDyingIds([]);
         setSpawningIds([]);
@@ -99,6 +101,7 @@ export function useTurnPlayback() {
       resetEffects();
       setAnimatedMatch(preMatch);
       setActiveEvent(null);
+      setPhaseEvent(events[0] ?? null);
       setIsAnimating(true);
       armWatchdog();
 
@@ -210,15 +213,26 @@ export function useTurnPlayback() {
           }
 
           const following = events[index + 1];
-          const pauseMs =
-            following && groupKey(following) === groupKey(event)
-              ? INTRA_ITERATION_PAUSE
-              : INTER_ITERATION_PAUSE;
+          const crossesGroup = Boolean(
+            following && groupKey(following) !== groupKey(event),
+          );
+          // A5: фазу переключаем в середине уже существующей длинной паузы.
+          // Так React успевает показать текущую фазу вместе с её эффектом, а
+          // следующая подпись всё ещё появляется до начала следующей группы.
+          // Суммарную длительность паузы баннер не увеличивает.
+          if (crossesGroup && following) {
+            const beforeSwitch = Math.floor(INTER_ITERATION_PAUSE / 2);
+            await pause(beforeSwitch);
+            if (generationRef.current !== generation) return;
+            setPhaseEvent(following);
+            await pause(INTER_ITERATION_PAUSE - beforeSwitch);
+            continue;
+          }
           // Пауза обязательна и после последнего события. Без await React
           // объединяет обновление последнего кадра с settleOnFinal(), поэтому
           // короткий ход (а иногда и весь ход из одного события) визуально
           // перескакивает прямо в финальное состояние.
-          await pause(pauseMs);
+          await pause(following ? INTRA_ITERATION_PAUSE : INTER_ITERATION_PAUSE);
         }
       } finally {
         settleOnFinal();
@@ -244,6 +258,7 @@ export function useTurnPlayback() {
     dyingIds,
     isAnimating,
     lunges,
+    phaseEvent,
     playTurn,
     popups,
     spawningIds,

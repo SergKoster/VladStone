@@ -18,6 +18,7 @@ import {
   DEATH_FADE_MS,
   LUNGE_MS,
   MOVE_MS,
+  PHASE_OVERLAY_FADE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
 } from "./animationConfig";
@@ -27,6 +28,7 @@ import {
   type LungeEffect,
 } from "./battleAnimations";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
+import { phaseLabel } from "./turnPlayback";
 import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
@@ -58,6 +60,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     dyingIds,
     isAnimating,
     lunges,
+    phaseEvent,
     playTurn,
     popups,
     spawningIds,
@@ -358,6 +361,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     );
   }
   const visibleMatch = renderedMatch ?? match;
+  const currentPhaseLabel = phaseLabel(phaseEvent);
   const lungeByUnit = new Map(lunges.map((lunge) => [lunge.unitId, lunge]));
   const visibleUnits = visibleMatch.units
     .filter((unit) => !unit.is_tower)
@@ -393,6 +397,10 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
         </div>
 
         <TowerRow label="Башни врага" towers={towersOf(enemy?.side ?? "top")} />
+
+        <div className="phase-overlay-slot">
+          <PhaseOverlay label={currentPhaseLabel} />
+        </div>
 
         <div className="board-v4-wrap" style={boardStyle}>
           <div className="board-v4">
@@ -569,6 +577,38 @@ function TowerRow({ label, towers }: { label: string; towers: CombatUnit[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PhaseOverlay({ label }: { label: string | null }) {
+  const [displayedLabel, setDisplayedLabel] = React.useState(label);
+
+  React.useEffect(() => {
+    if (label) {
+      setDisplayedLabel(label);
+      return undefined;
+    }
+    if (!displayedLabel) return undefined;
+    const timer = window.setTimeout(
+      () => setDisplayedLabel(null),
+      PHASE_OVERLAY_FADE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [displayedLabel, label]);
+
+  if (!displayedLabel) return null;
+  return (
+    <div
+      className={`iteration-overlay${label ? "" : " exiting"}`}
+      role="status"
+      style={
+        {
+          ["--phase-fade-ms" as string]: `${PHASE_OVERLAY_FADE_MS}ms`,
+        } as React.CSSProperties
+      }
+    >
+      <span key={displayedLabel}>{displayedLabel}</span>
     </div>
   );
 }

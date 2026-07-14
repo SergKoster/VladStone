@@ -66,6 +66,22 @@ export function groupKey(event: CombatEvent): string {
   return `${event.phase}:${event.micro_step}`;
 }
 
+/** Подпись A5 — только для реально присутствующей серверной фазы. */
+export function phaseLabel(event: CombatEvent | null): string | null {
+  switch (event?.phase) {
+    case "spells":
+      return "Заклинания";
+    case "spawn":
+      return "Появление воинов";
+    case "iterations":
+      return `Итерация ${event.micro_step}`;
+    case "end":
+      return "Конец хода";
+    default:
+      return null;
+  }
+}
+
 function mergeSnapshotUnit(
   snapshot: CombatSnapshotUnit,
   base: CombatUnit | undefined,
