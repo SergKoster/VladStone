@@ -72,11 +72,14 @@ export function useTurnPlayback() {
           armWatchdog();
 
           const following = events[index + 1];
-          if (!following) continue;
           const pauseMs =
-            groupKey(following) === groupKey(event)
+            following && groupKey(following) === groupKey(event)
               ? INTRA_ITERATION_PAUSE
               : INTER_ITERATION_PAUSE;
+          // Пауза обязательна и после последнего события. Без await React
+          // объединяет обновление последнего кадра с settleOnFinal(), поэтому
+          // короткий ход (а иногда и весь ход из одного события) визуально
+          // перескакивает прямо в финальное состояние.
           await pause(pauseMs);
         }
       } finally {
