@@ -14,6 +14,7 @@ import {
 import { CardArt } from "../../shared/cardArt";
 import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
+import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
   cards: CombatCatalogCard[];
@@ -37,6 +38,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const [resultDismissed, setResultDismissed] = React.useState(false);
   const [realtime, setRealtime] = React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const [secondsLeft, setSecondsLeft] = React.useState(TURN_SECONDS);
+  const { animatedMatch, isAnimating, playTurn } = useTurnPlayback();
   // Перетаскивание карты руки на клетку (pointer events — мышь и тач одним путём).
   const dragRef = React.useRef<{
     cardId: string;
@@ -55,11 +57,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   } | null>(null);
   const autoSubmittedDeadline = React.useRef<string | null>(null);
 
-  const viewer = match?.players.find((p) => p.id === match.viewer_id) ?? null;
-  const enemy = match?.players.find((p) => viewer && p.team !== viewer.team) ?? null;
-  const rows = match?.rows ?? 5;
-  const cols = match?.cols ?? 5;
-  const isFinished = match?.result.status === "finished" || match?.result.status === "expired";
+  const renderedMatch = isAnimating && animatedMatch ? animatedMatch : match;
+  const viewer = renderedMatch?.players.find((p) => p.id === renderedMatch.viewer_id) ?? null;
+  const enemy = renderedMatch?.players.find((p) => viewer && p.team !== viewer.team) ?? null;
+  const rows = renderedMatch?.rows ?? 5;
+  const cols = renderedMatch?.cols ?? 5;
+  const isFinished =
+    renderedMatch?.result.status === "finished" || renderedMatch?.result.status === "expired";
 
   const plannedCost = planned.reduce((sum, p) => sum + (catalog.get(p.card_id)?.cost ?? 0), 0);
   const availableMana = Math.max(0, (viewer?.mana ?? 0) - plannedCost);
@@ -106,7 +110,8 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       !match?.planning_deadline ||
       match.status !== "planning" ||
       secondsLeft > 0 ||
-      busy
+      busy ||
+      isAnimating
     ) {
       return;
     }
@@ -114,13 +119,22 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     if (autoSubmittedDeadline.current === deadlineKey) return;
     autoSubmittedDeadline.current = deadlineKey;
     void handleResolve();
-  }, [busy, match?.id, match?.planning_deadline, match?.status, match?.turn, secondsLeft]);
+  }, [
+    busy,
+    isAnimating,
+    match?.id,
+    match?.planning_deadline,
+    match?.status,
+    match?.turn,
+    secondsLeft,
+  ]);
 
   React.useEffect(() => {
     if (isFinished) setResultDismissed(false);
   }, [isFinished]);
 
   async function handleStart() {
+    if (isAnimating) return;
     setBusy(true);
     try {
       const res = await startCombat();
@@ -133,7 +147,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   }
 
   const unitAt = (row: number, col: number): CombatUnit | undefined =>
-    match?.units.find((u) => !u.is_tower && u.row === row && u.col === col);
+    renderedMatch?.units.find((u) => !u.is_tower && u.row === row && u.col === col);
   const plannedAt = (row: number, col: number) =>
     planned.find((p) => p.row === row && p.col === col);
 
@@ -151,7 +165,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   // Общая точка размещения — и клик-путь, и drag-n-drop идут через неё
   // (одинаковые проверки маны/зоны/занятости). true — карта запланирована.
   function placeCard(cardId: string, row: number, col: number): boolean {
-    if (busy || isFinished) return false;
+    if (busy || isAnimating || isFinished) return false;
     const card = catalog.get(cardId);
     if (!card) return false;
     if (plannedCost + card.cost > (viewer?.mana ?? 0)) return false;
@@ -185,7 +199,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   }
 
   function handleCardPointerDown(e: React.PointerEvent, cardId: string) {
-    if (busy || isFinished) return;
+    if (busy || isAnimating || isFinished) return;
     // Начало нового взаимодействия сбрасывает подавление: настоящий драг мыши
     // может не породить финальный click, и застрявший флаг съел бы следующий.
     suppressClickRef.current = false;
@@ -247,7 +261,8 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   }
 
   async function handleResolve() {
-    if (!match || busy || isFinished) return;
+    if (!match || busy || isAnimating || isFinished) return;
+    const preMatch = match;
     const placements: Placement[] = planned
       .filter((p): p is PlannedUnit => p.kind === "unit")
       .map(({ card_id, row, col }) => ({ card_id, row, col }));
@@ -260,6 +275,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setMatch(res.match);
       setPlanned([]);
       setSelected(null);
+      await playTurn(preMatch, res.events, res.match);
       if (res.match.result.status !== "active") onBattleFinished();
     } catch {
       // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
@@ -275,7 +291,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   }
 
   const towersOf = (side: "top" | "bottom") =>
-    (match?.units ?? [])
+    (renderedMatch?.units ?? [])
       .filter((u) => u.is_tower && u.side === side)
       .sort((a, b) => a.col - b.col);
 
@@ -292,12 +308,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   if (!match) {
     return (
       <section className="battle-empty">
-        <button className="ghost-btn" disabled={busy} onClick={handleStart}>
+        <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
           {busy ? "Запуск..." : "Старт боя"}
         </button>
       </section>
     );
   }
+  const visibleMatch = renderedMatch ?? match;
 
   return (
     <div className="battle-v4">
@@ -312,7 +329,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       ) : null}
       <section className="battle-stage">
         <div className="battle-topbar">
-          <button className="ghost-btn" disabled={busy} onClick={handleStart}>
+          <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
             Новый бой
           </button>
           <span className="rt-status">{realtime}</span>
@@ -337,6 +354,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                 className={`cell-v4${highlight ? " ok" : ""}`}
                 data-row={row}
                 data-col={col}
+                disabled={busy || isAnimating || isFinished}
                 onClick={() => handleCellClick(row, col)}
               >
                 {unit ? <UnitToken unit={unit} catalog={catalog} /> : null}
@@ -353,9 +371,11 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
         <TowerRow label="Твои башни" towers={towersOf(viewer?.side ?? "bottom")} />
 
         <div className="mana-bar" aria-label="Мана">
-          <div style={{ width: `${(availableMana / (match.mana_cap || 10)) * 100}%` }} />
+          <div
+            style={{ width: `${(availableMana / (visibleMatch.mana_cap || 10)) * 100}%` }}
+          />
           <span>
-            Мана {availableMana}/{match.mana_cap}
+            Мана {availableMana}/{visibleMatch.mana_cap}
           </span>
         </div>
       </section>
@@ -366,7 +386,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
             {secondsLeft}
           </div>
           <div className="turn-plate">
-            <strong>Ход {match.turn}</strong>
+            <strong>Ход {visibleMatch.turn}</strong>
             <span>Колода: {viewer?.deck_count ?? 0}</span>
           </div>
         </div>
@@ -386,7 +406,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                disabled={busy || isFinished || isPlanned || (!affordable && !isPlanned)}
+                disabled={
+                  busy ||
+                  isAnimating ||
+                  isFinished ||
+                  isPlanned ||
+                  (!affordable && !isPlanned)
+                }
                 onClick={() => handleCardClick(cardId)}
                 onPointerDown={(e) => handleCardPointerDown(e, cardId)}
                 onPointerMove={handleCardPointerMove}
@@ -428,21 +454,21 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
         <button
           className="resolve-btn"
-          disabled={busy || isFinished}
+          disabled={busy || isAnimating || isFinished}
           onClick={handleResolve}
         >
           {busy ? "Ход идёт..." : "Завершить ход"}
         </button>
 
         <ul className="battle-log">
-          {match.log.slice(-8).map((entry, i) => (
+          {visibleMatch.log.slice(-8).map((entry, i) => (
             <li key={i}>{entry.message}</li>
           ))}
         </ul>
       </section>
 
       {isFinished && !resultDismissed ? (
-        <ResultOverlay match={match} onClose={() => setResultDismissed(true)} />
+        <ResultOverlay match={visibleMatch} onClose={() => setResultDismissed(true)} />
       ) : null}
     </div>
   );

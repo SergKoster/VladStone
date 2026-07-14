@@ -117,18 +117,31 @@ export type CombatEvent = {
   micro_step: number | null;
   /** Фаза хода v4 (spells/spawn/iterations/end/draw); у MVP-событий null. */
   phase?: string | null;
-  snapshot: {
-    players?: CombatSnapshotPlayer[];
-    units?: CombatUnit[];
-  };
+  snapshot: CombatEventSnapshot;
 };
 
-/** Player slice inside event snapshots: hero/mana state only — no hand/deck. */
+/** Облегчённый срез игрока внутри снапшота события. */
 export type CombatSnapshotPlayer = {
   id: string;
-  side: "top" | "bottom";
   mana: number;
-  hero: { owner_id: string; side: "top" | "bottom"; hp: number };
+};
+
+/** Облегчённый юнит снапшота A1; остальные поля берутся из состояния матча. */
+export type CombatSnapshotUnit = {
+  id: string;
+  card_id: string | null;
+  side: "top" | "bottom";
+  row: number;
+  col: number;
+  current_hp: number;
+  max_hp: number;
+  stance: CombatStance;
+  is_tower: boolean;
+};
+
+export type CombatEventSnapshot = {
+  players: CombatSnapshotPlayer[];
+  units: CombatSnapshotUnit[];
 };
 
 export type CombatMatch = {
