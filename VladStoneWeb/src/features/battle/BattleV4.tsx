@@ -39,6 +39,10 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const [realtime, setRealtime] = React.useState<MatchRealtimeStatus>("Realtime не подключен");
   const [secondsLeft, setSecondsLeft] = React.useState(TURN_SECONDS);
   const { animatedMatch, isAnimating, playTurn } = useTurnPlayback();
+  // Синхронный флаг для WS-обработчика: React-state обновляется не сразу, а
+  // echo собственного resolve может прилететь раньше HTTP-ответа и показать
+  // финальное поле перед запуском плеера.
+  const isResolvingRef = React.useRef(false);
   // Перетаскивание карты руки на клетку (pointer events — мышь и тач одним путём).
   const dragRef = React.useRef<{
     cardId: string;
@@ -77,7 +81,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setSelected(null);
     };
     const disconnect = connectMatchRealtime({
-      isBusy: () => false,
+      isBusy: () => isResolvingRef.current,
       matchId: match.id,
       onSnapshot: apply,
       onUpdate: apply,
@@ -99,12 +103,20 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setSecondsLeft(TURN_SECONDS);
       return undefined;
     }
+    // Серверный deadline включает оценочный animation buffer. Если реальное
+    // проигрывание короче резерва, сырой deadline ещё несколько секунд был бы
+    // больше 30 и визуальный таймер «застывал» бы на 30 после анимации.
+    // Локальная шкала стартует сейчас, но никогда не продлевает серверный срок.
+    const displayDeadline = Math.min(
+      Date.parse(match.planning_deadline),
+      Date.now() + TURN_SECONDS * 1000,
+    );
     const tick = () => {
       const left = Math.max(
         0,
-        Math.ceil((Date.parse(match.planning_deadline!) - Date.now()) / 1000),
+        Math.ceil((displayDeadline - Date.now()) / 1000),
       );
-      setSecondsLeft(Math.min(TURN_SECONDS, left));
+      setSecondsLeft(left);
     };
     tick();
     const id = window.setInterval(tick, 500);
@@ -275,13 +287,14 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     const spells: SpellCast[] = planned
       .filter((p): p is PlannedSpell => p.kind === "spell")
       .map(({ card_id, row, col }) => ({ card_id, row, col }));
+    isResolvingRef.current = true;
     setBusy(true);
     try {
       const res = await resolveCombat(match.id, match.turn, placements, spells);
-      setMatch(res.match);
       setPlanned([]);
       setSelected(null);
       await playTurn(preMatch, res.events, res.match);
+      setMatch(res.match);
       if (res.match.result.status !== "active") onBattleFinished();
     } catch {
       // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
@@ -292,6 +305,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setPlanned([]);
       setSelected(null);
     } finally {
+      isResolvingRef.current = false;
       setBusy(false);
     }
   }
