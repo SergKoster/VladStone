@@ -1429,5 +1429,84 @@ H4). DESIGN §3.5 переписан.
   **упразднён** (Q4: лечение растит HP) — плеер должен уметь и рост HP.
 
 ### 22.5 Открытые вопросы к владельцу
-- Подтвердить вариант A (снапшоты) vs B (чистый фронт).
+- ✅ **Вариант A (снапшоты) — утверждён владельцем** (июль 2026).
 - Числа таймингов (внутришаг / межитерация) — стартовые, потом на вкус (O10).
+
+### 22.6 Детальная архитектура (вариант A) — канон реализации
+
+**Промпты для Codex по каждому подэтапу — `docs/ANIM_HANDOFF.md`.**
+
+#### Контракт снапшота события (A1)
+
+Каждое `CombatEvent` получает непустой `snapshot` — состояние доски НА МОМЕНТ
+эмиссии события (после мутации этого события):
+```
+event.snapshot = {
+  "units": [
+    { "id", "card_id"|null, "side", "row", "col",
+      "current_hp", "max_hp", "stance", "is_tower" }   // ЖИВЫЕ юниты
+  ],
+  "players": [ { "id", "mana" } ]
+}
+```
+- Захват в движке: helper `board_snapshot(ctx) -> dict` (в `apply.py`), читает
+  `ctx.units` (только hp>0 и не doomed — как `event_snapshot` MVP) + `players`.
+  `card_id` = `blueprint_id if in CARDS else None` (башни/токены без карты).
+  `stance` = `current_stance(unit, bp)`, `max_hp` = `effective_stats(...).hp`.
+- Где вызывать: снапшот должен отражать состояние ПОСЛЕ эффекта события.
+  Проще всего — в `apply.py` каждая `_effect`-функция ставит
+  `event.snapshot = board_snapshot(ctx)` перед `append`; в `resolver.py` для
+  своих событий (spell_cast/spawned/attack/moved/collision/unit_died/…) — так
+  же после мутации. Детерминированность I3 сохранить: сортировать units по id
+  внутри снапшота.
+- `translate.py`: перенести `fact.snapshot` в `CombatEvent.snapshot`.
+- Тесты: у каждого события снапшот непустой; у `moved` снапшот показывает юнит
+  на НОВОЙ клетке; у `unit_died` мёртвого в снапшоте уже НЕТ; 141+ зелёные.
+
+#### Фронт: модель воспроизведения (A2)
+
+Новые файлы в `src/features/battle/`:
+- `animationConfig.ts` — константы: `INTRA_ITERATION_PAUSE` (плотно, ~90мс),
+  `INTER_ITERATION_PAUSE` (заметно, ~600мс), `LUNGE_MS`, `POPUP_TTL`,
+  `WATCHDOG_MS`. Числа — заглушки под O10.
+- `turnPlayback.ts` — ЧИСТЫЕ функции (тестируемы, без React):
+  - `applySnapshot(match, snapshot) -> match` — наложить снапшот события на
+    состояние доски (позиции/HP/мана/стойка из снапшота; юниты по id;
+    отсутствующие в снапшоте, но живые — оставить до их death-события, как
+    `mergeUnitsHp` MVP; **потолка HP нет — рост допустим, Q4**).
+  - `lungeOffset(event) -> {dx,dy}` — из `from_position`/`to_position`.
+  - `groupKey(event) -> string` — `${phase}:${micro_step}` для пауз.
+- `useTurnPlayback.ts` — хук-оркестратор (async-цикл):
+  - вход: доресолв `match`, `events`, финальный `match`.
+  - ведёт `animatedMatch` + `activeEvent` + `isAnimating`; синхронный
+    `isPlayingRef` (замок от двойного запуска).
+  - алгоритм: `for event of events`: `setAnimatedMatch(applySnapshot(cur,
+    event.snapshot))`; `setActiveEvent(event)`; спец-эффект (lunge/popup/fade)
+    по типу; `await pause`: если следующий event сменил `groupKey` —
+    `INTER_ITERATION_PAUSE`, иначе `INTRA_ITERATION_PAUSE`; пустые группы не
+    показывать. В конце — осесть на финальный `match`, `isAnimating=false`.
+  - watchdog: `WATCHDOG_MS` без прогресса → форс-финиш на финальный `match`
+    (generation-token, чтобы старая корутина не дописывала поверх).
+
+#### Фронт: рендер и эффекты (A4)
+
+- `BattleV4` рендерит из `animatedMatch` (во время анимации) / `match` (в
+  планировании). Юниты — в СТАБИЛЬНОМ порядке по id (не по массиву — иначе
+  реордер DOM рестартит CSS-анимацию, MVP-баг «двойная коллизия»).
+- `UnitToken` получает флаги `acting` (=`activeEvent.actor_id`), `targeted`
+  (=`activeEvent.target_id`), `dying`; CSS-классы под выпад/подсветку/фейд.
+- Попапы урона/лечения — по `damage`/`after_hp` активного события у клетки
+  цели. HP-число берётся из `animatedMatch` (снапшот+after_hp).
+
+#### Интеграция в `BattleV4.handleResolve` (A2/A6)
+
+Сейчас: `setMatch(res.match)`. Станет: сохранить `preMatch = match`; вызвать
+плеер `playTurn(preMatch, res.events, res.match)`; по завершении — `match`
+уже = финал. **Дедуп WS-эха (R1):** свой резолв приходит и HTTP-ответом, и
+WS-`match.updated`; проигрывать ОДИН раз — realtime `apply` не должен
+перезапускать плеер для уже сыгранного хода (ключ по `turn`/последнему
+сыгранному id). На планирование — блок `isAnimating`.
+
+#### Что НЕ трогать
+Правила боя (`engine/*.py` кроме добавления snapshot-поля и его захвата),
+резолвер-логику, персистенс, роуты. Снапшот — только наблюдаемость.
