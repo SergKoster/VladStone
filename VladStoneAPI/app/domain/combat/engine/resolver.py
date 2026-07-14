@@ -30,6 +30,7 @@ from app.domain.combat.engine.apply import (
     EffectContext,
     EngineEvent,
     apply_effect,
+    board_snapshot,
     select_targets,
 )
 from app.domain.combat.engine.cards import CardType
@@ -140,24 +141,29 @@ def _stamp(events: list[EngineEvent], phase: str, iteration: int | None = None):
     return events
 
 
+def _event(ctx: EffectContext, **data) -> EngineEvent:
+    """Создать факт резолвера со снимком доски в текущий момент."""
+    return EngineEvent(**data, snapshot=board_snapshot(ctx))
+
+
 # --- Фаза 1: заклинания ---
 
 
 def _cast_spell(ctx: EffectContext, player: PlayerState, intent: SpellIntent):
     card = ctx.cards.get(intent.card_id)
     if card is None or card.card_type != CardType.SPELL or card.spell_id not in ctx.spells:
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
     if intent.card_id not in player.hand or player.mana < card.cost:
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
     origin = (intent.row, intent.col) if intent.row is not None and intent.col is not None else None
     script = ctx.spells[card.spell_id]
     if origin is None and any(action.target.scope != "board" for action in script.actions):
         # Точечному скрипту нужна точка применения — намерение битое.
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
 
     player.hand.remove(intent.card_id)
     player.mana -= card.cost
-    events = [EngineEvent(kind="spell_cast", player_id=player.id, card_id=card.id)]
+    events = [_event(ctx, kind="spell_cast", player_id=player.id, card_id=card.id)]
     for action in script.actions:
         targets = select_targets(action.target, ctx, caster_side=player.side, origin=origin)
         events += apply_effect(
@@ -177,17 +183,17 @@ def _spawn_from_hand(ctx: EffectContext, player: PlayerState, intent: SpawnInten
         or not card.collectible
         or card.blueprint_id not in ctx.blueprints
     ):
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
     if intent.card_id not in player.hand or player.mana < card.cost:
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
     blueprint = ctx.blueprints[card.blueprint_id]
     allowed_rows = blueprint.spawn_zone.resolve(side=player.side, rows=ctx.rows)
     if intent.row not in allowed_rows or not 0 <= intent.col < ctx.cols:
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
 
     push_events = _resolve_spawn_push(ctx, player.side, intent.row, intent.col)
     if push_events is None:
-        return [EngineEvent(kind="fizzled", player_id=player.id, card_id=intent.card_id)]
+        return [_event(ctx, kind="fizzled", player_id=player.id, card_id=intent.card_id)]
 
     player.hand.remove(intent.card_id)
     player.mana -= card.cost
@@ -202,7 +208,8 @@ def _spawn_from_hand(ctx: EffectContext, player: PlayerState, intent: SpawnInten
     )
     ctx.units.append(unit)
     events = push_events + [
-        EngineEvent(
+        _event(
+            ctx,
             kind="spawned",
             unit_id=unit.id,
             player_id=player.id,
@@ -224,7 +231,8 @@ def _fire_abilities(ctx: EffectContext, unit: UnitState, trigger: TriggerHook):
         if ability.trigger != trigger:
             continue
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="ability_triggered",
                 unit_id=unit.id,
                 trigger=trigger.value,
@@ -263,7 +271,8 @@ def _resolve_spawn_push(
             return None
         occupant.row = behind_row
         return [
-            EngineEvent(
+            _event(
+                ctx,
                 kind="pushed",
                 unit_id=occupant.id,
                 from_cell=(row, col),
@@ -289,7 +298,8 @@ def _resolve_spawn_push(
         before = unit.row
         unit.row += forward
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="pushed",
                 unit_id=unit.id,
                 from_cell=(before, col),
@@ -352,7 +362,8 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
         before = target.current_hp
         target.current_hp -= damage  # минус легален (C3)
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="attack",
                 unit_id=attacker.id,
                 target_id=target.id,
@@ -372,7 +383,8 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             before = unit.row
             unit.row, unit.col = cell
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="moved",
                     unit_id=unit.id,
                     from_cell=(before, unit.col),
@@ -395,7 +407,8 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
         for unit in (first, second):
             unit.remaining_steps -= 1
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="collision",
                 unit_id=first.id,
                 target_id=second.id,
@@ -407,7 +420,8 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             before = unit.current_hp
             unit.current_hp -= damage
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="damage",
                     unit_id=unit.id,
                     amount=damage,
@@ -470,7 +484,8 @@ def _end_of_turn_effects(ctx: EffectContext, turn_events: list[EngineEvent]) -> 
                 before = unit.current_hp
                 unit.current_hp -= spec.tick_damage
                 events.append(
-                    EngineEvent(
+                    _event(
+                        ctx,
                         kind="damage",
                         unit_id=unit.id,
                         amount=spec.tick_damage,
@@ -483,7 +498,8 @@ def _end_of_turn_effects(ctx: EffectContext, turn_events: list[EngineEvent]) -> 
                 before = unit.current_hp
                 unit.current_hp += spec.tick_heal
                 events.append(
-                    EngineEvent(
+                    _event(
+                        ctx,
                         kind="heal",
                         unit_id=unit.id,
                         amount=spec.tick_heal,
@@ -511,7 +527,12 @@ def _end_of_turn_effects(ctx: EffectContext, turn_events: list[EngineEvent]) -> 
         for status_id in before_ids:
             if status_id not in after_ids:
                 events.append(
-                    EngineEvent(kind="status_expired", unit_id=unit.id, status_id=status_id)
+                    _event(
+                        ctx,
+                        kind="status_expired",
+                        unit_id=unit.id,
+                        status_id=status_id,
+                    )
                 )
     return events
 
@@ -534,7 +555,8 @@ def _run_quests(ctx: EffectContext, facts: list[EngineEvent]) -> list[EngineEven
                 continue  # клеймо ещё висит — проверим в следующем ходу
             outcome = spec.quest.on_success if fulfilled else spec.quest.on_fail
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="ability_triggered",
                     unit_id=unit.id,
                     trigger=f"quest:{status.id}:{'success' if fulfilled else 'fail'}",
@@ -546,7 +568,12 @@ def _run_quests(ctx: EffectContext, facts: list[EngineEvent]) -> list[EngineEven
             if fulfilled:
                 unit.statuses = [s for s in unit.statuses if s is not status]
                 events.append(
-                    EngineEvent(kind="status_expired", unit_id=unit.id, status_id=status.id)
+                    _event(
+                        ctx,
+                        kind="status_expired",
+                        unit_id=unit.id,
+                        status_id=status.id,
+                    )
                 )
     return events
 
@@ -572,12 +599,13 @@ def _draw_and_mana(
         # Участник без deck-цикла (скриптовый бот MVP) не добирает.
         if (player.deck or player.hand) and len(player.hand) < HAND_CAP:
             if draw_card(player) is not None:
-                events.append(EngineEvent(kind="card_drawn", player_id=player.id, amount=1))
+                events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
         before = player.mana
         player.mana = min(ctx.mana_cap, player.mana + mana_gain(turn + 1))
         if player.mana != before:
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="mana_changed",
                     player_id=player.id,
                     amount=player.mana - before,
@@ -609,7 +637,8 @@ def run_death_wave(ctx: EffectContext) -> list[EngineEvent]:
         for unit in wave:
             ctx.units.remove(unit)
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="unit_died",
                     unit_id=unit.id,
                     from_cell=(unit.row, unit.col),

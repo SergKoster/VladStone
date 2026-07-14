@@ -171,6 +171,8 @@ def test_deal_damage_goes_negative_and_spares_structures_by_default() -> None:
     assert tower.current_hp == 10
     assert [event.kind for event in events] == ["damage"]
     assert events[0].before == 4 and events[0].after == -2
+    assert events[0].snapshot["players"]
+    assert unit.id not in {item["id"] for item in events[0].snapshot["units"]}
 
     piercing = apply_effect(
         DealDamage(amount=3, affects_structures=True), ctx, caster_id="p1", targets=[tower]

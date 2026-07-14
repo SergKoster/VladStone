@@ -28,6 +28,8 @@ from app.domain.combat.engine import (
     resolve_turn_v4,
     spawn_unit,
 )
+from app.domain.combat.engine.apply import board_snapshot
+from app.domain.combat.engine.content import BLUEPRINTS
 from app.domain.combat.engine.statuses import STATUS_POISON, Status
 from app.domain.combat.models import HeroState, PlayerSide, PlayerState
 
@@ -140,6 +142,93 @@ def resolve(ctx, *intents, turn=1, coin=0, mana_gain=lambda turn: 0):
 
 def unit_ids(ctx) -> set[str]:
     return {unit.id for unit in ctx.units}
+
+
+# --- A1: снапшоты доски на каждом событии ---
+
+
+def test_board_snapshot_contract_and_unit_order_are_deterministic() -> None:
+    ctx = make_ctx(BLUEPRINTS["test_bruiser"], BLUEPRINTS["tower_default"])
+    tower = add_unit(
+        ctx,
+        uid="z_tower",
+        owner="p1",
+        row=ROWS,
+        col=0,
+        bp="tower_default",
+    )
+    bruiser = add_unit(
+        ctx,
+        uid="a_bruiser",
+        owner="p1",
+        row=4,
+        col=1,
+        bp="test_bruiser",
+    )
+
+    snapshot = board_snapshot(ctx)
+
+    assert [unit["id"] for unit in snapshot["units"]] == [bruiser.id, tower.id]
+    assert snapshot["units"][0] == {
+        "id": bruiser.id,
+        "card_id": "test_bruiser",
+        "side": "bottom",
+        "row": 4,
+        "col": 1,
+        "current_hp": 4,
+        "max_hp": 4,
+        "stance": "attack",
+        "is_tower": False,
+    }
+    assert snapshot["units"][1]["card_id"] is None
+    assert snapshot["units"][1]["is_tower"] is True
+    assert snapshot["players"] == [{"id": "p1", "mana": 10}, {"id": "p2", "mana": 10}]
+
+
+def test_event_snapshots_capture_new_move_cell_and_exclude_dead_units() -> None:
+    mover_blueprint = make_blueprint(
+        "mover",
+        stats=UnitStats(hp=4, damage=0, attacks_per_turn=0, move_steps=1),
+    )
+    move_ctx = make_ctx(mover_blueprint)
+    mover = add_unit(move_ctx, uid="mover", owner="p1", row=3, col=2, bp="mover")
+    move_events = resolve(move_ctx, turn=1)
+    moved = next(event for event in move_events if event.kind == "moved")
+    moved_unit = next(unit for unit in moved.snapshot["units"] if unit["id"] == mover.id)
+
+    assert all(event.snapshot for event in move_events)
+    assert (moved_unit["row"], moved_unit["col"]) == moved.to_cell
+
+    duelist = make_blueprint(
+        "duelist_snapshot",
+        stats=UnitStats(hp=2, damage=2, attacks_per_turn=1, move_steps=0),
+    )
+    death_ctx = make_ctx(duelist)
+    mine = add_unit(
+        death_ctx,
+        uid="mine",
+        owner="p1",
+        row=2,
+        col=1,
+        bp="duelist_snapshot",
+    )
+    theirs = add_unit(
+        death_ctx,
+        uid="theirs",
+        owner="p2",
+        row=1,
+        col=1,
+        bp="duelist_snapshot",
+    )
+    death_events = resolve(death_ctx, turn=1)
+    deaths = [event for event in death_events if event.kind == "unit_died"]
+
+    assert all(event.snapshot for event in death_events)
+    assert {event.unit_id for event in deaths} == {mine.id, theirs.id}
+    assert all(
+        event.unit_id not in {unit["id"] for unit in event.snapshot["units"]}
+        for event in deaths
+    )
 
 
 # --- C1: чередование спелл-фазы + волна между игроками ---

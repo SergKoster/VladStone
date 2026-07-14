@@ -4,9 +4,6 @@
 единственная точка, где факты v4 становятся контрактом клиента (ARCH §2.1).
 Маппинг ТОТАЛЕН: каждый вид факта обязан переводиться — непереведённый вид
 падает здесь громко, а не теряется молча (тест перебирает все виды).
-
-Снапшоты состояния (event.snapshot) заполняются на интеграции движка
-(сериализация v4-состояния в MatchState — этап подмены), здесь они пустые.
 """
 
 from app.domain.combat.engine.apply import EngineEvent
@@ -66,6 +63,7 @@ def translate_engine_events(
                 # как в MVP-контракте); фаза уходит отдельным полем.
                 micro_step=fact.iteration or 0,
                 phase=fact.phase,
+                snapshot=fact.snapshot,
             )
         )
     return events

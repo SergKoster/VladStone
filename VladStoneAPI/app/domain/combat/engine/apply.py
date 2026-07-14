@@ -14,7 +14,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.domain.combat.deck import draw_card
 from app.domain.combat.engine.abilities import SpellScript
@@ -38,11 +38,18 @@ from app.domain.combat.engine.effects import (
 from app.domain.combat.engine.patterns import forward_direction
 from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.statuses import Status, apply_forced_stance
-from app.domain.combat.engine.tags import TAG_IMMOVABLE, TAG_STRUCTURE, validate_tags
+from app.domain.combat.engine.tags import (
+    TAG_IMMOVABLE,
+    TAG_STRUCTURE,
+    TAG_TOWER,
+    validate_tags,
+)
 from app.domain.combat.engine.targeting import TargetSelector, TargetSide
 from app.domain.combat.engine.units import (
     UnitBlueprint,
     UnitState,
+    current_stance,
+    effective_stats,
     spawn_unit,
     unit_tags,
 )
@@ -101,6 +108,7 @@ class EngineEvent(BaseModel):
     # Проставляются резолвером: фаза хода и номер итерации внутри фазы 4.
     phase: str | None = None
     iteration: int | None = None
+    snapshot: dict = Field(default_factory=dict)
 
 
 @dataclass
@@ -140,6 +148,40 @@ class EffectContext:
     def opponents_of(self, player_id: str) -> list[PlayerState]:
         me = self.player_by_id(player_id)
         return [player for player in self.players if player.team != me.team]
+
+
+def board_snapshot(ctx: EffectContext) -> dict:
+    """Лёгкий снимок живой доски в момент эмиссии события (A1)."""
+    # Локальный импорт разрывает цикл content -> towers -> apply.
+    from app.domain.combat.engine.content import CARDS
+
+    units = []
+    for unit in sorted(ctx.units, key=lambda item: item.id):
+        if unit.current_hp <= 0 or unit.doomed:
+            continue
+        blueprint = ctx.blueprint_of(unit)
+        units.append(
+            {
+                "id": unit.id,
+                "card_id": unit.blueprint_id if unit.blueprint_id in CARDS else None,
+                "side": unit.side.value,
+                "row": unit.row,
+                "col": unit.col,
+                "current_hp": unit.current_hp,
+                "max_hp": effective_stats(unit, blueprint).hp,
+                "stance": current_stance(unit, blueprint).value,
+                "is_tower": TAG_TOWER in unit_tags(unit, blueprint),
+            }
+        )
+    return {
+        "units": units,
+        "players": [{"id": player.id, "mana": player.mana} for player in ctx.players],
+    }
+
+
+def _event(ctx: EffectContext, **data) -> EngineEvent:
+    """Создать факт и сразу зафиксировать состояние после его мутации."""
+    return EngineEvent(**data, snapshot=board_snapshot(ctx))
 
 
 def select_targets(
@@ -207,7 +249,7 @@ def apply_effect(
     if isinstance(effect, DealDamage):
         return _deal_damage(effect, ctx, targets or [])
     if isinstance(effect, Heal):
-        return _heal(effect, targets or [])
+        return _heal(effect, ctx, targets or [])
     if isinstance(effect, ApplyStatus):
         return _apply_status(effect, ctx, targets or [])
     if isinstance(effect, ChangeStance):
@@ -221,9 +263,9 @@ def apply_effect(
     if isinstance(effect, Execute):
         return _execute(ctx, targets or [])
     if isinstance(effect, BuffStats):
-        return _buff_stats(effect, targets or [])
+        return _buff_stats(effect, ctx, targets or [])
     if isinstance(effect, ModifyBudget):
-        return _modify_budget(effect, targets or [])
+        return _modify_budget(effect, ctx, targets or [])
     if isinstance(effect, SpawnToken):
         return _spawn_token(effect, ctx, caster_id=caster_id, cell=cell)
     if isinstance(effect, DrawCard):
@@ -247,7 +289,8 @@ def _deal_damage(
         before = unit.current_hp
         unit.current_hp -= effect.amount  # минус легален внутри итерации (C3)
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="damage",
                 unit_id=unit.id,
                 amount=effect.amount,
@@ -258,13 +301,16 @@ def _deal_damage(
     return events
 
 
-def _heal(effect: Heal, targets: list[UnitState]) -> list[EngineEvent]:
+def _heal(
+    effect: Heal, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
     events = []
     for unit in targets:
         before = unit.current_hp
         unit.current_hp += effect.amount  # потолка нет (Q4)
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="heal",
                 unit_id=unit.id,
                 amount=effect.amount,
@@ -307,7 +353,8 @@ def _apply_status(
             )
             unit.statuses[unit.statuses.index(existing)] = merged
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="status_applied",
                 unit_id=unit.id,
                 status_id=effect.status_id,
@@ -326,7 +373,9 @@ def _change_stance(
         if TAG_IMMOVABLE in unit_tags(unit, ctx.blueprint_of(unit)):
             continue
         unit.statuses = apply_forced_stance(unit.statuses, stance=effect.stance, ttl=effect.ttl)
-        events.append(EngineEvent(kind="stance_changed", unit_id=unit.id, stance=effect.stance))
+        events.append(
+            _event(ctx, kind="stance_changed", unit_id=unit.id, stance=effect.stance)
+        )
     return events
 
 
@@ -336,7 +385,7 @@ def _grant_tag(effect: GrantTag, ctx: EffectContext, targets: list[UnitState]) -
         if effect.tag in unit_tags(unit, ctx.blueprint_of(unit)):
             continue  # уже есть — идемпотентно, без события
         unit.granted_tags = validate_tags((*unit.granted_tags, effect.tag))
-        events.append(EngineEvent(kind="tag_granted", unit_id=unit.id, tag=effect.tag))
+        events.append(_event(ctx, kind="tag_granted", unit_id=unit.id, tag=effect.tag))
     return events
 
 
@@ -359,12 +408,13 @@ def _push(effect: Push, ctx: EffectContext, targets: list[UnitState]) -> list[En
             row = next_row
             moved += 1
         if moved == 0:
-            events.append(EngineEvent(kind="fizzled", unit_id=unit.id))
+            events.append(_event(ctx, kind="fizzled", unit_id=unit.id))
             continue
         before_row = unit.row
         unit.row = row
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="pushed",
                 unit_id=unit.id,
                 from_cell=(before_row, unit.col),
@@ -398,7 +448,13 @@ def _kill_if(
         # от урона, где вампиризм может вытащить из минуса — C3).
         unit.doomed = True
         events.append(
-            EngineEvent(kind="killed", unit_id=unit.id, before=unit.current_hp, after=0)
+            _event(
+                ctx,
+                kind="killed",
+                unit_id=unit.id,
+                before=unit.current_hp,
+                after=0,
+            )
         )
     return events
 
@@ -413,12 +469,20 @@ def _execute(ctx: EffectContext, targets: list[UnitState]) -> list[EngineEvent]:
             continue
         unit.doomed = True  # Q5: неотменяемо, волна добьёт независимо от HP
         events.append(
-            EngineEvent(kind="killed", unit_id=unit.id, before=unit.current_hp, after=0)
+            _event(
+                ctx,
+                kind="killed",
+                unit_id=unit.id,
+                before=unit.current_hp,
+                after=0,
+            )
         )
     return events
 
 
-def _buff_stats(effect: BuffStats, targets: list[UnitState]) -> list[EngineEvent]:
+def _buff_stats(
+    effect: BuffStats, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
     events = []
     for unit in targets:
         bonus = unit.permanent_bonuses
@@ -433,7 +497,8 @@ def _buff_stats(effect: BuffStats, targets: list[UnitState]) -> list[EngineEvent
         if effect.hp:
             unit.current_hp += effect.hp  # бафф здоровья лечит на ту же величину
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="stat_buffed",
                 unit_id=unit.id,
                 amount=effect.hp or effect.damage or effect.attacks_per_turn
@@ -443,13 +508,16 @@ def _buff_stats(effect: BuffStats, targets: list[UnitState]) -> list[EngineEvent
     return events
 
 
-def _modify_budget(effect: ModifyBudget, targets: list[UnitState]) -> list[EngineEvent]:
+def _modify_budget(
+    effect: ModifyBudget, ctx: EffectContext, targets: list[UnitState]
+) -> list[EngineEvent]:
     events = []
     for unit in targets:
         unit.remaining_steps = max(0, unit.remaining_steps + effect.steps)
         unit.remaining_attacks = max(0, unit.remaining_attacks + effect.attacks)
         events.append(
-            EngineEvent(
+            _event(
+                ctx,
                 kind="budget_modified",
                 unit_id=unit.id,
                 amount=effect.steps or effect.attacks,
@@ -474,7 +542,9 @@ def _spawn_token(
     row, col = cell
     if not (0 <= row < ctx.rows and 0 <= col < ctx.cols) or ctx.unit_at(row, col) is not None:
         # I5: клетка занята/вне поля — эффект детерминированно фейлится.
-        return [EngineEvent(kind="fizzled", card_id=effect.card_id, to_cell=(row, col))]
+        return [
+            _event(ctx, kind="fizzled", card_id=effect.card_id, to_cell=(row, col))
+        ]
     assert card.blueprint_id is not None  # гарантировано валидатором карты
     blueprint = ctx.blueprints[card.blueprint_id]
     owner = ctx.player_by_id(caster_id)
@@ -489,7 +559,8 @@ def _spawn_token(
     )
     ctx.units.append(token)
     return [
-        EngineEvent(
+        _event(
+            ctx,
             kind="token_spawned",
             unit_id=token.id,
             player_id=owner.id,
@@ -514,7 +585,7 @@ def _draw_card(effect: DrawCard, ctx: EffectContext, *, caster_id: str) -> list[
                 break
             if draw_card(player) is None:
                 break
-            events.append(EngineEvent(kind="card_drawn", player_id=player.id, amount=1))
+            events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
     return events
 
 
@@ -527,7 +598,8 @@ def _modify_mana(effect: ModifyMana, ctx: EffectContext, *, caster_id: str) -> l
         player.mana = max(0, min(ctx.mana_cap, player.mana + effect.amount))
         if player.mana != before:
             events.append(
-                EngineEvent(
+                _event(
+                    ctx,
                     kind="mana_changed",
                     player_id=player.id,
                     amount=player.mana - before,

@@ -23,6 +23,10 @@ def test_every_engine_fact_kind_has_a_client_mapping() -> None:
 
 
 def test_attack_fact_maps_to_full_animation_contract() -> None:
+    snapshot = {
+        "units": [{"id": "u1", "row": 3, "col": 1}],
+        "players": [{"id": "p1", "mana": 4}],
+    }
     fact = EngineEvent(
         kind="attack",
         unit_id="u1",
@@ -34,6 +38,7 @@ def test_attack_fact_maps_to_full_animation_contract() -> None:
         to_cell=(1, 1),
         phase="iterations",
         iteration=2,
+        snapshot=snapshot,
     )
     [event] = translate_engine_events([fact], sequence_start=7)
     assert event.type == CombatEventType.ATTACK
@@ -42,6 +47,7 @@ def test_attack_fact_maps_to_full_animation_contract() -> None:
     assert event.from_position == Position(row=3, col=1)
     assert event.to_position == Position(row=1, col=1)
     assert event.sequence == 7 and event.micro_step == 2 and event.phase == "iterations"
+    assert event.snapshot == snapshot
 
 
 def test_unit_scoped_facts_put_the_unit_into_target_id() -> None:
