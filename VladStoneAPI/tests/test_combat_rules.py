@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from app.domain.combat.cards import DECK_CARD_IDS
+from app.domain.combat.constants import MAX_RESOLVE_BUFFER_SECONDS
 from app.domain.combat.helpers import bot_players, human_players
 from app.domain.combat.models import (
     ActionPriority,
@@ -23,7 +24,10 @@ from app.domain.combat.rules import (
     resolve_turn,
     reward_for_result,
 )
-from app.domain.combat.timing import is_planning_deadline_expired
+from app.domain.combat.timing import (
+    is_planning_deadline_expired,
+    resolution_buffer_seconds,
+)
 
 # Rule scenarios must not depend on the content catalog (its stats are
 # placeholder "1s" while the combat rework is being designed). These legacy
@@ -188,7 +192,15 @@ def test_match_has_server_planning_deadline_and_refreshes_it_after_resolve() -> 
     resolved = resolve_turn(match, now=resolved_at)
 
     assert resolved.turn == 2
-    assert resolved.planning_deadline == resolved_at + timedelta(seconds=30)
+    assert resolved.planning_deadline == resolved_at + timedelta(
+        seconds=30 + resolution_buffer_seconds(len(resolved.events))
+    )
+
+
+def test_resolution_buffer_is_event_based_and_capped() -> None:
+    assert resolution_buffer_seconds(0) == 0
+    assert resolution_buffer_seconds(1) == 1
+    assert resolution_buffer_seconds(10_000) == MAX_RESOLVE_BUFFER_SECONDS
 
 
 def test_spawn_zone_is_nearest_row_to_hero() -> None:

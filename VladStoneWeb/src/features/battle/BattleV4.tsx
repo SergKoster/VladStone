@@ -89,6 +89,12 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
   // --- turn countdown from the server planning deadline ---
   React.useEffect(() => {
+    if (isAnimating) {
+      // Дедлайн следующего хода уже включает серверный animation buffer, но
+      // игроку во время резолва показываем именно паузу, а не убывающие секунды.
+      setSecondsLeft(TURN_SECONDS);
+      return undefined;
+    }
     if (!match?.planning_deadline || match.status !== "planning") {
       setSecondsLeft(TURN_SECONDS);
       return undefined;
@@ -103,7 +109,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [match?.planning_deadline, match?.status]);
+  }, [isAnimating, match?.planning_deadline, match?.status]);
 
   React.useEffect(() => {
     if (

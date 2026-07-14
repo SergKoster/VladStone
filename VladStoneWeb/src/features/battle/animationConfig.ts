@@ -1,4 +1,5 @@
-// Стартовые значения для покадрового проигрывания A2; баланс таймингов — A3/O10.
-export const INTRA_ITERATION_PAUSE = 90;
-export const INTER_ITERATION_PAUSE = 600;
+// A3: внутри одной итерации кадры идут плотно, граница итераций читается
+// отдельной заметной паузой. Значения уточнены после первого плейтеста A2.
+export const INTRA_ITERATION_PAUSE = 160;
+export const INTER_ITERATION_PAUSE = 700;
 export const WATCHDOG_MS = 8_000;
