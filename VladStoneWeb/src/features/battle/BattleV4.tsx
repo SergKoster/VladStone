@@ -421,7 +421,16 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
               );
             })}
           </div>
-          <div className="unit-layer unit-layer-v4" aria-live="polite">
+          <div
+            className="unit-layer unit-layer-v4"
+            aria-live="polite"
+            style={
+              {
+                ["--cols" as string]: cols,
+                ["--rows" as string]: rows,
+              } as React.CSSProperties
+            }
+          >
             {cellPulses.map((pulse) => (
               <CellPulseView key={pulse.key} pulse={pulse} />
             ))}
