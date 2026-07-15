@@ -16,7 +16,7 @@ from app.domain.combat.constants import (
     RULESET_VERSION,
     TURN_DURATION_SECONDS,
 )
-from app.domain.combat.engine.apply import EffectContext
+from app.domain.combat.engine.apply import EffectContext, EngineEvent
 from app.domain.combat.engine.bot import plan_bot_intents
 from app.domain.combat.engine.content import (
     BLUEPRINTS,
@@ -67,6 +67,10 @@ class BattleStateV4(BaseModel):
     units: list[UnitState] = Field(default_factory=list)
     log: list[CombatLogEntry] = Field(default_factory=list)
     result: MatchResult = Field(default_factory=MatchResult)
+    # Последняя полная лента нужна для 409/lazy GET/reconnect: клиент не должен
+    # терять реплей, если HTTP-ответ или живой WS-broadcast его не достигли.
+    last_resolved_turn: int | None = Field(default=None, ge=1)
+    last_events: list[EngineEvent] = Field(default_factory=list)
 
 
 def build_context(state: BattleStateV4) -> EffectContext:
@@ -132,13 +136,14 @@ def resolve_v4_turn(
     *,
     human_intents: PlayerIntents,
     now: datetime | None = None,
-) -> list:
+) -> list[EngineEvent]:
     """Разыграть ход: намерения человека + боты, резолвер, винкон/суд, таймер.
 
     Возвращает список фактов движка (EngineEvent) — переводятся в клиентские
     события в payload-слое. Мутирует state.
     """
     checked_at = _as_utc(now or datetime.now(UTC))
+    resolved_turn = state.turn
     ctx = build_context(state)
     intents = [human_intents]
     for player in state.players:
@@ -157,6 +162,8 @@ def resolve_v4_turn(
             mana_gain=v4_mana_gain,
         )
     apply_context(state, ctx)
+    state.last_resolved_turn = resolved_turn
+    state.last_events = events
 
     _advance_turn_and_check_end(state, ctx, forced=forced, num_events=len(events), now=checked_at)
     return events

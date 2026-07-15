@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -5,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models import CombatMatchRecord
+from app.domain.combat.engine.apply import EngineEvent
 from app.domain.combat.engine.battle import BattleStateV4, resolve_v4_turn
 from app.domain.combat.engine.intents import PlayerIntents
 from app.domain.combat.helpers import human_players
@@ -18,12 +20,19 @@ from app.services.combat_matches import (
 from app.services.rewards import claim_combat_reward
 
 
+@dataclass(frozen=True)
+class ResolvedPlanningMatch:
+    state: BattleStateV4
+    events: list[EngineEvent]
+    resolved_turn: int
+
+
 def resolve_expired_planning_match(
     db: Session,
     record: CombatMatchRecord,
     *,
     now: datetime | None = None,
-) -> BattleStateV4 | None:
+) -> ResolvedPlanningMatch | None:
     """Дорезолв матча с истёкшим дедлайном планирования (v4).
 
     Ruleset-гейт сработал раньше в вызывающем коде (§8.7): сюда попадают только
@@ -38,18 +47,27 @@ def resolve_expired_planning_match(
         return None
 
     human = human_players(state)[0]
-    resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human.id), now=checked_at)
+    resolved_turn = state.turn
+    events = resolve_v4_turn(
+        state,
+        human_intents=PlayerIntents(player_id=human.id),
+        now=checked_at,
+    )
     save_v4_battle(record, state)
     if record.owner_user_id is not None:
         claim_combat_reward(db, match=state, user_id=record.owner_user_id)
-    return state
+    return ResolvedPlanningMatch(
+        state=state,
+        events=events,
+        resolved_turn=resolved_turn,
+    )
 
 
 def resolve_expired_planning_matches(
     db: Session,
     *,
     now: datetime | None = None,
-) -> list[BattleStateV4]:
+) -> list[ResolvedPlanningMatch]:
     checked_at = now or datetime.now(UTC)
     db.flush()
     records = list(
@@ -59,7 +77,7 @@ def resolve_expired_planning_matches(
             )
         )
     )
-    resolved_matches: list[BattleStateV4] = []
+    resolved_matches: list[ResolvedPlanningMatch] = []
     for record in records:
         # Commit per match: an optimistic-lock conflict on one match (someone
         # resolved it concurrently) must not discard the other resolves.

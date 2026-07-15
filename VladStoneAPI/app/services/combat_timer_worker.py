@@ -17,6 +17,10 @@ async def run_combat_timer_worker() -> None:
             resolved_matches = resolve_expired_planning_matches(db)
             if not resolved_matches:
                 continue
-        for match in resolved_matches:
+        for resolved in resolved_matches:
             with suppress(RuntimeError):
-                await match_channel_manager.broadcast_match_update(match)
+                await match_channel_manager.broadcast_match_update(
+                    resolved.state,
+                    events=resolved.events,
+                    resolved_turn=resolved.resolved_turn,
+                )

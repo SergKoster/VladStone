@@ -26,14 +26,46 @@ class MatchChannelManager:
         if not sockets:
             self._connections.pop(match_id, None)
 
-    async def send_snapshot(self, websocket: WebSocket, match: BattleStateV4) -> None:
-        await websocket.send_json({"type": "match.snapshot", **v4_combat_response(match)})
+    async def send_snapshot(
+        self,
+        websocket: WebSocket,
+        match: BattleStateV4,
+        *,
+        events: list | None = None,
+        resolved_turn: int | None = None,
+    ) -> None:
+        await websocket.send_json(
+            {
+                "type": "match.snapshot",
+                **v4_combat_response(
+                    match,
+                    events=events,
+                    resolved_turn=resolved_turn,
+                ),
+            }
+        )
 
     async def send_pong(self, websocket: WebSocket) -> None:
         await websocket.send_json({"type": "pong"})
 
-    async def broadcast_match_update(self, match: BattleStateV4) -> None:
-        await self._broadcast(match.id, {"type": "match.updated", **v4_combat_response(match)})
+    async def broadcast_match_update(
+        self,
+        match: BattleStateV4,
+        *,
+        events: list | None = None,
+        resolved_turn: int | None = None,
+    ) -> None:
+        await self._broadcast(
+            match.id,
+            {
+                "type": "match.updated",
+                **v4_combat_response(
+                    match,
+                    events=events,
+                    resolved_turn=resolved_turn,
+                ),
+            },
+        )
 
     async def broadcast_expired(self, match_id: str) -> None:
         payload = {"type": "match.updated", **expired_match_payload(match_id)}

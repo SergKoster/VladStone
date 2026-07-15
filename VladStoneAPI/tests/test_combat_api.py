@@ -11,6 +11,7 @@ from app.db.session import SessionLocal
 from app.domain.combat.constants import RULESET_VERSION
 from app.domain.combat.engine.battle import BattleStateV4, build_context, create_v4_battle
 from app.domain.combat.engine.content import DECK_CARD_IDS_V4
+from app.domain.combat.engine.payload import v4_combat_response
 from app.domain.combat.engine.towers import towers_of
 from app.domain.combat.models import MatchLifecycleStatus
 from app.main import create_app
@@ -18,6 +19,7 @@ from app.services.combat_matches import (
     RULESET_EXPIRED_MESSAGE,
     create_combat_match_record,
     load_v4_battle,
+    save_v4_battle,
 )
 from app.services.combat_turn_timers import resolve_expired_planning_matches
 
@@ -152,8 +154,16 @@ def test_match_websocket_snapshot_ping_and_update() -> None:
             json={"match_id": started["id"], "turn": 1, "placements": []},
         )
         assert resolve.status_code == 200
+        http_payload = resolve.json()
         update = ws.receive_json()
         assert update["type"] == "match.updated" and update["match"]["turn"] == 2
+        assert update["resolved_turn"] == http_payload["resolved_turn"] == 1
+        assert update["last_sequence"] == http_payload["last_sequence"]
+        assert update["events"] == http_payload["events"]
+        assert update["events"]
+        lazy = client.get(f"/api/combat/{started['id']}").json()
+        assert lazy["resolved_turn"] == 1
+        assert lazy["events"] == http_payload["events"]
 
 
 def test_deadline_resolves_by_timer_without_client() -> None:
@@ -164,10 +174,89 @@ def test_deadline_resolves_by_timer_without_client() -> None:
         create_combat_match_record(db, match=match, owner_user_id=None)
         resolved = resolve_expired_planning_matches(db)
         db.commit()
-    assert match.id in {state.id for state in resolved}
+    assert match.id in {result.state.id for result in resolved}
+    result = next(result for result in resolved if result.state.id == match.id)
+    assert result.resolved_turn == 1
+    assert result.events
+    payload = v4_combat_response(
+        result.state,
+        events=result.events,
+        resolved_turn=result.resolved_turn,
+    )
+    assert payload["resolved_turn"] == 1
+    assert payload["last_sequence"] == payload["events"][-1]["sequence"]
     with SessionLocal() as db:
         state = load_v4_battle(db.get(CombatMatchRecord, match.id))
     assert state.turn == 2 and state.status == MatchLifecycleStatus.PLANNING
+
+
+def test_deadline_409_keeps_full_replay_in_websocket_update() -> None:
+    client = TestClient(create_app())
+    started = client.post("/api/combat/start").json()["match"]
+
+    with client.websocket_connect(f"/ws/matches/{started['id']}") as ws:
+        assert ws.receive_json()["type"] == "match.snapshot"
+        with SessionLocal() as db:
+            record = db.get(CombatMatchRecord, started["id"])
+            state = load_v4_battle(record)
+            state.planning_deadline = datetime.now(UTC) - timedelta(seconds=1)
+            save_v4_battle(record, state)
+            db.commit()
+
+        response = client.post(
+            "/api/combat/resolve",
+            json={"match_id": started["id"], "turn": 1, "placements": []},
+        )
+        assert response.status_code == 409
+        update = ws.receive_json()
+        assert update["type"] == "match.updated"
+        assert update["resolved_turn"] == 1
+        assert update["match"]["turn"] == 2
+        assert update["events"]
+        assert update["last_sequence"] == update["events"][-1]["sequence"]
+
+
+def test_evil_dolbiki_and_following_turn_both_broadcast_replay() -> None:
+    client = TestClient(create_app())
+    state = create_v4_battle(match_id=f"local_pve_{uuid4().hex}")
+    human = next(player for player in state.players if not player.is_bot)
+    bot = next(player for player in state.players if player.is_bot)
+    human.hand = ["evil_dolbiki"]
+    human.mana = state.mana_cap
+    bot.hand = []
+    bot.deck = []
+    with SessionLocal() as db:
+        create_combat_match_record(db, match=state, owner_user_id=None)
+        db.commit()
+
+    with client.websocket_connect(f"/ws/matches/{state.id}") as ws:
+        assert ws.receive_json()["type"] == "match.snapshot"
+        first = client.post(
+            "/api/combat/resolve",
+            json={
+                "match_id": state.id,
+                "turn": 1,
+                "placements": [{"card_id": "evil_dolbiki", "row": 4, "col": 2}],
+            },
+        )
+        assert first.status_code == 200
+        first_update = ws.receive_json()
+        assert first_update["resolved_turn"] == 1
+        assert first_update["events"] == first.json()["events"]
+        assert {event["type"] for event in first_update["events"]} >= {
+            "spawn",
+            "ability_triggered",
+        }
+
+        second = client.post(
+            "/api/combat/resolve",
+            json={"match_id": state.id, "turn": 2, "placements": []},
+        )
+        assert second.status_code == 200
+        second_update = ws.receive_json()
+        assert second_update["resolved_turn"] == 2
+        assert second_update["events"] == second.json()["events"]
+        assert second_update["events"]
 
 
 def test_outdated_ruleset_match_expires_on_get_and_rejects_resolve() -> None:

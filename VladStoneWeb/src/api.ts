@@ -185,6 +185,10 @@ export type CombatMatch = {
 export type CombatResponse = {
   match: CombatMatch;
   events: CombatEvent[];
+  /** Ход, породивший events; не выводится клиентом косвенно из match.turn. */
+  resolved_turn: number | null;
+  /** Последняя sequence полной ленты; часть ключа дедупликации HTTP/WS. */
+  last_sequence: number | null;
 };
 
 export type MatchSocketMessage =

@@ -70,6 +70,13 @@ class Position(BaseModel):
     col: int = Field(ge=0)
 
 
+class EventPosition(BaseModel):
+    """Координата события; башни v4 живут на призрачных рядах -1/rows."""
+
+    row: int = Field(ge=-1)
+    col: int = Field(ge=0)
+
+
 class UnitStats(BaseModel):
     hp: int = Field(gt=0)
     damage: int = Field(gt=0)
@@ -137,8 +144,9 @@ class CombatEvent(BaseModel):
     target_id: str | None = None
     target_kind: CombatTargetKind | None = None
     damage: int | None = None
-    from_position: Position | None = None
-    to_position: Position | None = None
+    # Legacy-события используют Position, v4 допускает призрачные ряды башен.
+    from_position: Position | EventPosition | None = None
+    to_position: Position | EventPosition | None = None
     before_hp: int | None = None
     after_hp: int | None = None
     sequence: int | None = None

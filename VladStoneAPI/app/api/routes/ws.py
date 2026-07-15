@@ -33,15 +33,23 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             db.commit()
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-        match = resolve_expired_planning_match(db, record)
-        if match is not None:
+        resolved = resolve_expired_planning_match(db, record)
+        if resolved is not None:
             db.commit()
+            match = resolved.state
         else:
             match = load_v4_battle(record)
 
     await match_channel_manager.connect(match_id, websocket)
     try:
-        await match_channel_manager.send_snapshot(websocket, match)
+        await match_channel_manager.send_snapshot(
+            websocket,
+            match,
+            events=resolved.events if resolved is not None else match.last_events,
+            resolved_turn=(
+                resolved.resolved_turn if resolved is not None else match.last_resolved_turn
+            ),
+        )
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "ping":

@@ -71,6 +71,8 @@ before_hp/after_hp, sequence, micro_step, affected_cells,
 snapshot{players,units}`. `affected_cells` — полная визуальная область события
 на поле, включая пустые клетки; её вычисляет сервер из того же selector, что и
 реальные цели, а клиент только отображает.
+`from/to_position.row` допускает призрачные ряды башен `-1` и `rows`; это
+координата анимации, а не допустимая клетка размещения карты.
 `sequence` — сквозной номер события в ходе (уникальный, строго растёт).
 `micro_step` — номер итерации резолвера (микрохода): спавны сетапа = 0,
 микроходы = 1, 2, 3…; повторяется у всех событий одной итерации. Клиент по нему
@@ -101,7 +103,11 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
 - `services/combat_turn_timers.py`: дорезолв матчей с истёкшим дедлайном.
   Вызывается и лениво из роутов, и фоновым воркером
   `services/combat_timer_worker.py` (asyncio-задача в lifespan, тик 1 с,
-  broadcast в WS-канал матча) — AFK-игрок не блокирует матч.
+  broadcast в WS-канал матча) — AFK-игрок не блокирует матч. Результат любого
+  пути — единый resolution-envelope: финальный `match`, явный `resolved_turn`,
+  `last_sequence` и полная `events`. Последний envelope хранится внутри
+  `BattleStateV4` (`last_resolved_turn`/`last_events`), поэтому lazy GET и
+  reconnect не превращают завершённый ход в eventless-снап.
 - `services/combat_payloads.py`: сериализация матча наружу, **payload
   viewer-специфичен** (`viewer_id` в ответе): колода игрока не сериализуется
   никогда (только `deck_count`), рука уходит только её владельцу (остальным —
@@ -392,21 +398,16 @@ payload матча (уже так, `MatchState.rows/cols`); **клиент ст�
   PvE-допущение: получатель по умолчанию — единственный человек матча
   (`combat_response`); per-socket viewer'ы — вместе с invite flow ниже.
 
-**Ближайший reliability-долг резолва (июль 2026, после A6).** Сейчас только
-HTTP `POST /combat/resolve` возвращает `events` выполненного хода. WS
-`match.updated`, timer-worker и lazy-resolve строят payload из финального
-`BattleStateV4` без событий (`events: []`), поэтому клиент вынужден показать
-финал снапом. Это вероятная системная причина бага «после Злых Долбиков
-пропали все анимации»; сама карта пока не доказана как первопричина.
-
-Целевой ближний контракт — единый `ResolvedTurnEnvelope` для HTTP/WS/timer:
-`{match, resolved_turn, events, last_sequence}`. Таймерные сервисы возвращают
-из `resolve_v4_turn` и состояние, и факты; broadcast принимает events явно.
-Клиент отдаёт envelope в одну `consumeResolution` и проигрывает первый полный
-источник, дедуплицируя остальные по `(match_id, resolved_turn, last_sequence)`.
-Eventless update не должен перетирать активный реплей. Для позднего reconnect
-последний envelope (либо start-of-turn snapshot + events) хранится до следующего
-хода. Детальный план и регресс-сценарии — COMBAT_REWORK §23.1.
+**Reliability резолва после A6 — ✅ закрыто (июль 2026).** HTTP
+`POST /combat/resolve`, WS `match.updated`, timer-worker и lazy-resolve используют
+единый `ResolvedTurnEnvelope`: `{match, resolved_turn, events, last_sequence}`.
+Таймерные сервисы возвращают состояние вместе с фактами, broadcast принимает
+их явно, а последняя полная лента хранится в `BattleStateV4` до следующего
+резолва. Клиент проигрывает первый полный источник и дедуплицирует остальные по
+`(match_id, resolved_turn, last_sequence)`; полноценное WS-эхо не теряется даже
+во время собственного HTTP resolve/409. Связанный сбой сериализации атак башен
+на призрачных рядах также закрыт отдельным `EventPosition`. Детали и регрессии —
+COMBAT_REWORK §23.1.
 
 Осталось для PvP (целевое состояние):
 - Планирование: все участники шлют placements до дедлайна; резолв — когда все

@@ -173,6 +173,8 @@ def expired_match_payload(match_id: str) -> dict:
             "log": [{"message": RULESET_EXPIRED_MESSAGE}],
         },
         "events": [],
+        "resolved_turn": None,
+        "last_sequence": None,
     }
 
 

@@ -7,7 +7,13 @@
 """
 
 from app.domain.combat.engine.apply import EngineEvent
-from app.domain.combat.models import CombatEvent, CombatEventType, CombatTargetKind, Position
+from app.domain.combat.models import (
+    CombatEvent,
+    CombatEventType,
+    CombatTargetKind,
+    EventPosition,
+    Position,
+)
 
 # Вид факта → тип клиентского события. Дополняется вместе с EngineEvent.kind.
 _KIND_TO_TYPE: dict[str, CombatEventType] = {
@@ -101,10 +107,10 @@ def _target_kind(fact: EngineEvent) -> CombatTargetKind | None:
     return None
 
 
-def _position(cell: tuple[int, int] | None) -> Position | None:
+def _position(cell: tuple[int, int] | None) -> EventPosition | None:
     if cell is None:
         return None
-    return Position(row=cell[0], col=cell[1])
+    return EventPosition(row=cell[0], col=cell[1])
 
 
 def _message(fact: EngineEvent) -> str:

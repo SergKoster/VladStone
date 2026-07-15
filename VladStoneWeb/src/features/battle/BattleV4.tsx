@@ -88,6 +88,12 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   } | null>(null);
   const autoSubmittedDeadline = React.useRef<string | null>(null);
   const realtimePlaybackKeyRef = React.useRef<string | null>(null);
+  // Полноценное WS-эхо не выбрасываем во время собственного HTTP resolve:
+  // при гонке с таймером именно оно может оказаться единственной лентой хода.
+  const pendingRealtimeResolutionRef = React.useRef<CombatResponse | null>(null);
+  const realtimeResolutionWaiterRef = React.useRef<
+    ((payload: CombatResponse) => void) | null
+  >(null);
 
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
     matchRef.current = nextMatch;
@@ -112,20 +118,20 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       setPlanned([]);
       setSelected(null);
     };
-    const applySnapshot = (payload: CombatResponse) => {
-      // Снапшот при reconnect — авторитетное текущее состояние. Во время
-      // собственного resolve его HTTP-ответ остаётся источником анимации.
-      if (isResolvingRef.current) return;
-      commitMatch(payload.match);
-      clearPlans();
-    };
-    const applyUpdate = (payload: CombatResponse) => {
+    const consumeResolution = (payload: CombatResponse) => {
       // R1: broadcast собственного resolve может обогнать HTTP-ответ. Не даём
-      // ему показать финальный кадр и не запускаем второй проигрыватель.
-      if (isResolvingRef.current) return;
+      // ему показать финальный кадр, но сохраняем полную ленту на случай 409.
+      if (isResolvingRef.current) {
+        if (payload.events.length > 0) {
+          pendingRealtimeResolutionRef.current = payload;
+          realtimeResolutionWaiterRef.current?.(payload);
+        }
+        return;
+      }
       const preMatch = matchRef.current;
       if (!preMatch) {
-        applySnapshot(payload);
+        commitMatch(payload.match);
+        clearPlans();
         return;
       }
       clearPlans();
@@ -133,9 +139,8 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       const advanced =
         payload.match.turn > preMatch.turn || payload.match.status !== preMatch.status;
       if (!advanced || payload.events.length === 0) {
-        // Текущий WS-контракт broadcast не несёт события. Для таймерного
-        // резолва остаёмся на серверном финале; когда события появятся, ветка
-        // ниже автоматически включит тот же покадровый плеер.
+        // Eventless snapshot допустим для первичного connect, но не является
+        // источником реплея завершённого хода.
         commitMatch(payload.match);
         return;
       }
@@ -154,6 +159,8 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
           }
         });
     };
+    const applySnapshot = (payload: CombatResponse) => consumeResolution(payload);
+    const applyUpdate = (payload: CombatResponse) => consumeResolution(payload);
     const disconnect = connectMatchRealtime({
       matchId: match.id,
       onSnapshot: applySnapshot,
@@ -369,10 +376,12 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     const spells: SpellCast[] = planned
       .filter((p): p is PlannedSpell => p.kind === "spell")
       .map(({ card_id, row, col }) => ({ card_id, row, col }));
+    pendingRealtimeResolutionRef.current = null;
     isResolvingRef.current = true;
     setBusy(true);
     try {
       const res = await resolveCombat(match.id, match.turn, placements, spells);
+      pendingRealtimeResolutionRef.current = null;
       setPlanned([]);
       setSelected(null);
       await playTurn(preMatch, res.events, res.match, responsePlaybackKey(res));
@@ -380,13 +389,45 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       if (res.match.result.status !== "active") onBattleFinished();
     } catch {
       // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
-      // подтягиваем авторитетное состояние И чистим планы — они были для
-      // прошлого хода, иначе «залипают» на поле поверх нового хода (W5).
-      const fresh = await getCombat(match.id).catch(() => null);
-      if (fresh) commitMatch(fresh.match);
+      // сначала ждём полноценное WS-эхо. Eventless GET — только fallback,
+      // иначе он успевает показать финал и лишает реплей исходного состояния.
+      const realtimeResolution =
+        pendingRealtimeResolutionRef.current ??
+        (await waitForRealtimeResolution(realtimeResolutionWaiterRef));
+      const belongsToRequestedTurn =
+        realtimeResolution?.match.id === preMatch.id &&
+        realtimeResolution.resolved_turn === preMatch.turn &&
+        realtimeResolution.events.length > 0;
+      if (realtimeResolution && belongsToRequestedTurn) {
+        await playTurn(
+          preMatch,
+          realtimeResolution.events,
+          realtimeResolution.match,
+          responsePlaybackKey(realtimeResolution),
+        );
+        commitMatch(realtimeResolution.match);
+      } else {
+        const fresh = await getCombat(match.id).catch(() => null);
+        if (
+          fresh?.resolved_turn === preMatch.turn &&
+          fresh.events.length > 0
+        ) {
+          await playTurn(
+            preMatch,
+            fresh.events,
+            fresh.match,
+            responsePlaybackKey(fresh),
+          );
+          commitMatch(fresh.match);
+        } else if (fresh) {
+          commitMatch(fresh.match);
+        }
+      }
       setPlanned([]);
       setSelected(null);
     } finally {
+      realtimeResolutionWaiterRef.current = null;
+      pendingRealtimeResolutionRef.current = null;
       isResolvingRef.current = false;
       setBusy(false);
     }
@@ -620,6 +661,22 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       ) : null}
     </div>
   );
+}
+
+function waitForRealtimeResolution(
+  waiterRef: React.MutableRefObject<((payload: CombatResponse) => void) | null>,
+): Promise<CombatResponse | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (payload: CombatResponse | null) => {
+      if (settled) return;
+      settled = true;
+      waiterRef.current = null;
+      resolve(payload);
+    };
+    waiterRef.current = finish;
+    window.setTimeout(() => finish(null), 750);
+  });
 }
 
 function TowerRow({ label, towers }: { label: string; towers: CombatUnit[] }) {

@@ -63,6 +63,8 @@ def test_resolve_advances_turn_and_serializes_round_trip() -> None:
     assert restored.turn == 2
     assert len(restored.units) == len(state.units)
     assert restored.spell_coin == state.spell_coin
+    assert restored.last_resolved_turn == 1
+    assert restored.last_events == events
 
 
 def test_win_condition_when_all_enemy_towers_gone() -> None:

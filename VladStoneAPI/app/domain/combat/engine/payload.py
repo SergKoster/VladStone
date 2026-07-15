@@ -90,8 +90,12 @@ def v4_combat_response(
     *,
     viewer_id: str | None = None,
     events: list | None = None,
+    resolved_turn: int | None = None,
 ) -> dict:
     """Payload матча для одного клиента; events — факты последнего хода."""
+    if events is None and resolved_turn is None:
+        events = state.last_events
+        resolved_turn = state.last_resolved_turn
     if viewer_id is None:
         humans = human_players(state)
         viewer_id = humans[0].id if humans else None
@@ -133,4 +137,6 @@ def v4_combat_response(
     return {
         "match": match_payload,
         "events": [event.model_dump(mode="json") for event in client_events],
+        "resolved_turn": resolved_turn,
+        "last_sequence": client_events[-1].sequence if client_events else None,
     }

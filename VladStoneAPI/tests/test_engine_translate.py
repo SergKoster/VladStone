@@ -5,7 +5,7 @@ from typing import get_args
 import pytest
 
 from app.domain.combat.engine import EngineEvent, translate_engine_events
-from app.domain.combat.models import CombatEventType, Position
+from app.domain.combat.models import CombatEventType, EventPosition, Position
 
 
 def all_engine_kinds() -> list[str]:
@@ -45,11 +45,24 @@ def test_attack_fact_maps_to_full_animation_contract() -> None:
     assert event.type == CombatEventType.ATTACK
     assert event.actor_id == "u1" and event.target_id == "u2"
     assert event.damage == 2 and event.before_hp == 5 and event.after_hp == 3
-    assert event.from_position == Position(row=3, col=1)
-    assert event.to_position == Position(row=1, col=1)
+    assert event.from_position == EventPosition(row=3, col=1)
+    assert event.to_position == EventPosition(row=1, col=1)
     assert event.sequence == 7 and event.micro_step == 2 and event.phase == "iterations"
     assert event.affected_cells == [Position(row=2, col=0), Position(row=2, col=1)]
     assert event.snapshot == snapshot
+
+
+def test_tower_ghost_row_is_valid_in_animation_event() -> None:
+    fact = EngineEvent(
+        kind="attack",
+        unit_id="tower",
+        target_id="u1",
+        amount=1,
+        from_cell=(-1, 2),
+        to_cell=(0, 2),
+    )
+    [event] = translate_engine_events([fact])
+    assert event.from_position == EventPosition(row=-1, col=2)
 
 
 def test_unit_scoped_facts_put_the_unit_into_target_id() -> None:

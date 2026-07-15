@@ -8,11 +8,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
-from app.domain.combat.engine.battle import (
-    BattleStateV4,
-    create_v4_battle,
-    resolve_v4_turn,
-)
+from app.domain.combat.engine.battle import create_v4_battle, resolve_v4_turn
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.payload import v4_catalog_payload, v4_combat_response
 from app.domain.combat.helpers import human_players
@@ -31,7 +27,10 @@ from app.services.combat_matches import (
     load_v4_battle,
     save_v4_battle,
 )
-from app.services.combat_turn_timers import resolve_expired_planning_match
+from app.services.combat_turn_timers import (
+    ResolvedPlanningMatch,
+    resolve_expired_planning_match,
+)
 from app.services.rewards import claim_combat_reward
 
 router = APIRouter(prefix="/combat", tags=["combat"])
@@ -105,8 +104,16 @@ async def get_combat_match(
         return expired_match_payload(match_id)
     resolved = _resolve_expired_record_if_needed(db, record)
     if resolved is not None:
-        await match_channel_manager.broadcast_match_update(resolved)
-        return v4_combat_response(resolved)
+        await match_channel_manager.broadcast_match_update(
+            resolved.state,
+            events=resolved.events,
+            resolved_turn=resolved.resolved_turn,
+        )
+        return v4_combat_response(
+            resolved.state,
+            events=resolved.events,
+            resolved_turn=resolved.resolved_turn,
+        )
     return v4_combat_response(load_v4_battle(record))
 
 
@@ -125,7 +132,11 @@ async def resolve_combat_turn(
         )
     deadline_resolved = _resolve_expired_record_if_needed(db, record)
     if deadline_resolved is not None:
-        await match_channel_manager.broadcast_match_update(deadline_resolved)
+        await match_channel_manager.broadcast_match_update(
+            deadline_resolved.state,
+            events=deadline_resolved.events,
+            resolved_turn=deadline_resolved.resolved_turn,
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn deadline has passed",
@@ -193,8 +204,17 @@ async def resolve_combat_turn(
             detail="Combat turn was already resolved elsewhere",
         ) from None
 
-    response = v4_combat_response(state, viewer_id=acting_player.id, events=events)
-    await match_channel_manager.broadcast_match_update(state)
+    response = v4_combat_response(
+        state,
+        viewer_id=acting_player.id,
+        events=events,
+        resolved_turn=payload.turn,
+    )
+    await match_channel_manager.broadcast_match_update(
+        state,
+        events=events,
+        resolved_turn=payload.turn,
+    )
     return response
 
 
@@ -239,7 +259,10 @@ def _expire_record_if_outdated(db: Session, record) -> bool:
     return True
 
 
-def _resolve_expired_record_if_needed(db: Session, record) -> BattleStateV4 | None:
+def _resolve_expired_record_if_needed(
+    db: Session,
+    record,
+) -> ResolvedPlanningMatch | None:
     try:
         resolved = resolve_expired_planning_match(db, record)
         if resolved is None:
@@ -248,7 +271,11 @@ def _resolve_expired_record_if_needed(db: Session, record) -> BattleStateV4 | No
             db,
             record.owner_user_id,
             "combat.turn_deadline_resolved",
-            {"match_id": resolved.id, "turn": resolved.turn, "status": resolved.status.value},
+            {
+                "match_id": resolved.state.id,
+                "turn": resolved.resolved_turn,
+                "status": resolved.state.status.value,
+            },
         )
         db.commit()
     except StaleDataError:
