@@ -392,6 +392,22 @@ payload матча (уже так, `MatchState.rows/cols`); **клиент ст�
   PvE-допущение: получатель по умолчанию — единственный человек матча
   (`combat_response`); per-socket viewer'ы — вместе с invite flow ниже.
 
+**Ближайший reliability-долг резолва (июль 2026, после A6).** Сейчас только
+HTTP `POST /combat/resolve` возвращает `events` выполненного хода. WS
+`match.updated`, timer-worker и lazy-resolve строят payload из финального
+`BattleStateV4` без событий (`events: []`), поэтому клиент вынужден показать
+финал снапом. Это вероятная системная причина бага «после Злых Долбиков
+пропали все анимации»; сама карта пока не доказана как первопричина.
+
+Целевой ближний контракт — единый `ResolvedTurnEnvelope` для HTTP/WS/timer:
+`{match, resolved_turn, events, last_sequence}`. Таймерные сервисы возвращают
+из `resolve_v4_turn` и состояние, и факты; broadcast принимает events явно.
+Клиент отдаёт envelope в одну `consumeResolution` и проигрывает первый полный
+источник, дедуплицируя остальные по `(match_id, resolved_turn, last_sequence)`.
+Eventless update не должен перетирать активный реплей. Для позднего reconnect
+последний envelope (либо start-of-turn snapshot + events) хранится до следующего
+хода. Детальный план и регресс-сценарии — COMBAT_REWORK §23.1.
+
 Осталось для PvP (целевое состояние):
 - Планирование: все участники шлют placements до дедлайна; резолв — когда все
   подтвердили «готов» или по таймеру. Ранний резолв при полном наборе confirm.
