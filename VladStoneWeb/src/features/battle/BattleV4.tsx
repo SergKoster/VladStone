@@ -5,6 +5,7 @@ import {
   type CombatEvent,
   type CombatMatch,
   type CombatResponse,
+  type CombatStatusDefinition,
   type CombatUnit,
   type Placement,
   type SpellCast,
@@ -35,6 +36,7 @@ import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
   cards: CombatCatalogCard[];
+  statuses: CombatStatusDefinition[];
   onBattleFinished: () => void;
 };
 
@@ -45,9 +47,26 @@ type Planned = PlannedUnit | PlannedSpell;
 const TURN_SECONDS = 30;
 // Пикселей до превращения нажатия на карту в перетаскивание (ниже — тап-выбор).
 const DRAG_THRESHOLD = 6;
+// Даёт спокойно пересечь короткий зазор между токеном и плавающей панелью.
+const INSPECTOR_CLOSE_DELAY_MS = 240;
+const INSPECTOR_EDGE_PX = 8;
+const INSPECTOR_GAP_PX = 10;
+const INSPECTOR_WIDTH_PX = 224;
+const INSPECTOR_MAX_HEIGHT_PX = 280;
 
-export function BattleV4({ cards, onBattleFinished }: Props) {
+type InspectorPlacement =
+  | { side: "right"; left: number; top: number }
+  | { side: "left"; left: number; top: number }
+  | { side: "bottom" };
+
+type InspectedUnit = { unitId: string; placement: InspectorPlacement };
+
+export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
+  const statusCatalog = React.useMemo(
+    () => new Map(statuses.map((status) => [status.id, status])),
+    [statuses],
+  );
   const [match, setMatch] = React.useState<CombatMatch | null>(null);
   const matchRef = React.useRef<CombatMatch | null>(null);
   const [planned, setPlanned] = React.useState<Planned[]>([]);
@@ -97,6 +116,10 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const realtimeResolutionWaiterRef = React.useRef<
     ((payload: CombatResponse) => void) | null
   >(null);
+  const inspectorCloseTimerRef = React.useRef<number | null>(null);
+  const inspectedTokenRef = React.useRef<HTMLElement | null>(null);
+  const lastInspectorPointerTypeRef = React.useRef<string | null>(null);
+  const [inspected, setInspected] = React.useState<InspectedUnit | null>(null);
 
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
     matchRef.current = nextMatch;
@@ -113,6 +136,76 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
 
   const plannedCost = planned.reduce((sum, p) => sum + (catalog.get(p.card_id)?.cost ?? 0), 0);
   const availableMana = Math.max(0, (viewer?.mana ?? 0) - plannedCost);
+
+  function clearInspectorCloseTimer() {
+    if (inspectorCloseTimerRef.current !== null) {
+      window.clearTimeout(inspectorCloseTimerRef.current);
+      inspectorCloseTimerRef.current = null;
+    }
+  }
+
+  function placementForInspector(target: HTMLElement): InspectorPlacement {
+    const rect = target.getBoundingClientRect();
+    const top = Math.max(
+      INSPECTOR_EDGE_PX,
+      Math.min(rect.top, window.innerHeight - INSPECTOR_MAX_HEIGHT_PX - INSPECTOR_EDGE_PX),
+    );
+    if (rect.right + INSPECTOR_GAP_PX + INSPECTOR_WIDTH_PX <= window.innerWidth - INSPECTOR_EDGE_PX) {
+      return { side: "right", left: rect.right + INSPECTOR_GAP_PX, top };
+    }
+    if (rect.left - INSPECTOR_GAP_PX - INSPECTOR_WIDTH_PX >= INSPECTOR_EDGE_PX) {
+      return { side: "left", left: rect.left - INSPECTOR_GAP_PX - INSPECTOR_WIDTH_PX, top };
+    }
+    return { side: "bottom" };
+  }
+
+  function openInspector(unitId: string, target: HTMLElement) {
+    clearInspectorCloseTimer();
+    inspectedTokenRef.current = target;
+    setInspected({ unitId, placement: placementForInspector(target) });
+  }
+
+  function scheduleInspectorClose(unitId: string) {
+    clearInspectorCloseTimer();
+    inspectorCloseTimerRef.current = window.setTimeout(() => {
+      inspectorCloseTimerRef.current = null;
+      const focusedUnitId = document.activeElement?.getAttribute("data-inspector-unit-id");
+      if (focusedUnitId !== unitId) {
+        setInspected((current) => (current?.unitId === unitId ? null : current));
+      }
+    }, INSPECTOR_CLOSE_DELAY_MS);
+  }
+
+  function rememberInspectorPointer(pointerType: string) {
+    lastInspectorPointerTypeRef.current = pointerType;
+    window.setTimeout(() => {
+      lastInspectorPointerTypeRef.current = null;
+    }, 0);
+  }
+
+  React.useEffect(() => {
+    if (!inspected) return undefined;
+    const updatePlacement = () => {
+      if (inspectedTokenRef.current) {
+        setInspected((current) =>
+          current ? { ...current, placement: placementForInspector(inspectedTokenRef.current!) } : current,
+        );
+      }
+    };
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [inspected?.unitId]);
+
+  React.useEffect(
+    () => () => {
+      clearInspectorCloseTimer();
+    },
+    [],
+  );
 
   // --- realtime: server-pushed updates (timer resolves, own resolve echo) ---
   React.useEffect(() => {
@@ -467,6 +560,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const visibleUnits = visibleMatch.units
     .filter((unit) => !unit.is_tower)
     .sort((a, b) => a.id.localeCompare(b.id));
+  const inspectedUnit = inspected
+    ? visibleUnits.find((unit) => unit.id === inspected.unitId) ?? null
+    : null;
+  const inspectedCard = inspectedUnit?.card_id ? catalog.get(inspectedUnit.card_id) : null;
+  const inspectedCoverage = inspectedUnit && inspectedCard
+    ? coverageCellsFor(inspectedUnit, inspectedCard, rows, cols)
+    : new Set<string>();
   const boardStyle = {
     ["--area-pulse-ms" as string]: `${AREA_PULSE_MS}ms`,
     ["--cols" as string]: cols,
@@ -516,7 +616,13 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
               return (
                 <button
                   key={i}
-                  className={`cell-v4${highlight ? " ok" : ""}`}
+                  className={[
+                    "cell-v4",
+                    highlight ? "ok" : "",
+                    inspectedCoverage.has(`${row}:${col}`) ? "inspect-coverage" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   data-row={row}
                   data-col={col}
                   disabled={busy || isAnimating || isFinished}
@@ -552,6 +658,15 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                 dying={dyingIds.includes(unit.id)}
                 lunge={lungeByUnit.get(unit.id)}
                 spawning={spawningIds.includes(unit.id)}
+                inspected={inspected?.unitId === unit.id}
+                onInspectorBlur={() => scheduleInspectorClose(unit.id)}
+                onInspectorFocus={(target) => {
+                  if (lastInspectorPointerTypeRef.current !== "touch") openInspector(unit.id, target);
+                }}
+                onInspectorPointerDown={rememberInspectorPointer}
+                onInspectorPointerEnter={(target) => openInspector(unit.id, target)}
+                onInspectorPointerLeave={() => scheduleInspectorClose(unit.id)}
+                onUnitClick={() => handleCellClick(unit.row, unit.col)}
                 showRemainingActions={isAnimating}
                 targeted={activeEvent?.target_id === unit.id}
                 unit={unit}
@@ -562,6 +677,17 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
               <DamagePopupView key={popup.key} popup={popup} />
             ))}
           </div>
+          {inspected && inspectedUnit ? (
+            <UnitInspector
+              card={inspectedCard ?? undefined}
+              onPointerEnter={clearInspectorCloseTimer}
+              onPointerLeave={() => scheduleInspectorClose(inspectedUnit.id)}
+              placement={inspected.placement}
+              showRemainingActions={isAnimating}
+              statusCatalog={statusCatalog}
+              unit={inspectedUnit}
+            />
+          ) : null}
         </div>
 
         <TowerRow label="Твои башни" towers={towersOf(viewer?.side ?? "bottom")} />
@@ -738,7 +864,14 @@ function UnitToken({
   unit,
   catalog,
   dying,
+  inspected,
   lunge,
+  onInspectorBlur,
+  onInspectorFocus,
+  onInspectorPointerDown,
+  onInspectorPointerEnter,
+  onInspectorPointerLeave,
+  onUnitClick,
   showRemainingActions,
   spawning,
   targeted,
@@ -748,7 +881,14 @@ function UnitToken({
   unit: CombatUnit;
   catalog: Map<string, CombatCatalogCard>;
   dying: boolean;
+  inspected: boolean;
   lunge?: LungeEffect;
+  onInspectorBlur: () => void;
+  onInspectorFocus: (target: HTMLElement) => void;
+  onInspectorPointerDown: (pointerType: string) => void;
+  onInspectorPointerEnter: (target: HTMLElement) => void;
+  onInspectorPointerLeave: () => void;
+  onUnitClick: () => void;
   showRemainingActions: boolean;
   spawning: boolean;
   targeted: boolean;
@@ -766,7 +906,19 @@ function UnitToken({
       ]
         .filter(Boolean)
         .join(" ")}
+      aria-describedby={inspected ? "unit-inspector" : undefined}
+      aria-label={`Инспектор юнита: ${card?.name ?? "неизвестный юнит"}`}
+      data-inspector-unit-id={unit.id}
       data-unit-id={unit.id}
+      onBlur={onInspectorBlur}
+      onClick={onUnitClick}
+      onFocus={(event) => onInspectorFocus(event.currentTarget)}
+      onPointerDown={(event) => onInspectorPointerDown(event.pointerType)}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") onInspectorPointerEnter(event.currentTarget);
+      }}
+      onPointerLeave={onInspectorPointerLeave}
+      tabIndex={0}
       style={
         {
           ["--col" as string]: unit.col,
@@ -793,6 +945,7 @@ function UnitToken({
             acting ? "acting" : "",
             targeted ? "targeted" : "",
             waitReason ? "waiting" : "",
+            inspected ? "inspected" : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -834,6 +987,115 @@ function UnitToken({
         {waitReason ? <span className="unit-wait-badge">{unitWaitLabel(waitReason)}</span> : null}
       </span>
     </span>
+  );
+}
+
+function coverageCellsFor(
+  unit: CombatUnit,
+  card: CombatCatalogCard,
+  rows: number,
+  cols: number,
+): Set<string> {
+  const pattern = unit.stance === "defense" ? card.coverage_defense : card.coverage_attack;
+  const direction = unit.side === "top" ? 1 : -1;
+  return new Set(
+    (pattern ?? [])
+      .map(({ forward, col }) => ({ row: unit.row + forward * direction, col: unit.col + col }))
+      .filter(({ row, col }) => row >= 0 && row < rows && col >= 0 && col < cols)
+      .map(({ row, col }) => `${row}:${col}`),
+  );
+}
+
+function UnitInspector({
+  card,
+  onPointerEnter,
+  onPointerLeave,
+  placement,
+  showRemainingActions,
+  statusCatalog,
+  unit,
+}: {
+  card: CombatCatalogCard | undefined;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+  placement: InspectorPlacement;
+  showRemainingActions: boolean;
+  statusCatalog: Map<string, CombatStatusDefinition>;
+  unit: CombatUnit;
+}) {
+  const placementStyle = placement.side === "bottom"
+    ? undefined
+    : { left: placement.left, top: placement.top };
+  const stanceLabel = unit.stance === "defense" ? "Защита" : "Атака";
+  const stats = [
+    { icon: <HeartIcon />, label: "Здоровье", value: Math.max(0, unit.current_hp) },
+    { icon: <BurstIcon />, label: "Урон", value: unit.damage },
+    {
+      icon: <BootIcon />,
+      label: showRemainingActions ? "Шаги осталось" : "Шаги",
+      value: showRemainingActions ? unit.remaining_steps : unit.move_steps,
+    },
+    {
+      icon: <SwordIcon />,
+      label: showRemainingActions ? "Атаки осталось" : "Атаки",
+      value: showRemainingActions ? unit.remaining_attacks : unit.attacks_per_turn,
+    },
+  ];
+
+  return (
+    <aside
+      className={`unit-inspector ${placement.side}`}
+      id="unit-inspector"
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      role="region"
+      aria-label={`Инспектор: ${card?.name ?? "юнит"}`}
+      style={placementStyle}
+    >
+      <div className="unit-inspector-heading">
+        <strong>{card?.name ?? "Юнит"}</strong>
+        <span className={`unit-inspector-stance ${unit.stance}`}>
+          {unit.stance === "defense" ? "🛡" : "⚔"} {stanceLabel}
+        </span>
+      </div>
+      <dl className="unit-inspector-stats">
+        {stats.map(({ icon, label, value }) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>
+              {icon}
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <section className="unit-inspector-statuses" aria-label="Статус-эффекты">
+        <strong>Статусы</strong>
+        {unit.statuses.length ? (
+          <ul>
+            {unit.statuses.map((status) => {
+              const definition = statusCatalog.get(status.id);
+              const duration = status.ttl !== null
+                ? ` · ещё ходов: ${status.ttl}`
+                : definition?.decay === "permanent"
+                  ? " · постоянно"
+                  : "";
+              return (
+                <li key={status.id}>
+                  <span>
+                    <b>{definition?.name ?? status.id}</b>
+                    {` · стаков: ${status.stacks}${duration}`}
+                  </span>
+                  {definition ? <small>{definition.description}</small> : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <span className="muted">Нет</span>
+        )}
+      </section>
+    </aside>
   );
 }
 

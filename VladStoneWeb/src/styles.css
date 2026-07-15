@@ -1526,6 +1526,10 @@ nav {
 
 .unit-layer-v4 .unit-token {
   z-index: 2;
+  /* Tokens are focusable for the read-only W1c inspector. Click is forwarded
+     to the cell, so spell targeting keeps its existing behaviour until W1d. */
+  pointer-events: auto;
+  cursor: help;
 }
 
 .unit-layer-v4 .unit-token-inner {
@@ -1575,6 +1579,25 @@ nav {
   box-shadow: inset 0 0 0 2px #7fca97;
 }
 
+/* W1c: coverage of an inspected unit is amber and hatched, deliberately unlike
+   green placement targets and blue planned actions. */
+.cell-v4.inspect-coverage {
+  border-color: #b97825;
+  background-color: #fff5dd;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(235 174 70 / 0.28) 0 5px,
+    transparent 5px 10px
+  );
+  box-shadow: inset 0 0 0 2px rgb(190 124 33 / 0.72);
+}
+.cell-v4.ok.inspect-coverage {
+  border-color: #3f9d5f;
+  box-shadow:
+    inset 0 0 0 2px rgb(190 124 33 / 0.72),
+    0 0 0 2px #7fca97;
+}
+
 .plan-mark {
   font-size: 0.6rem;
   font-weight: 700;
@@ -1600,6 +1623,20 @@ nav {
 }
 .unit-v4.top {
   box-shadow: 0 0 0 2px #d0443c;
+}
+
+/* Hover/focus has its own gold ring; side ownership remains the inner
+   green/red outline and stance remains the icon, so these signals do not mix. */
+.unit-v4.inspected,
+.unit-layer-v4 .unit-token:focus-visible .unit-v4 {
+  box-shadow:
+    0 0 0 2px var(--unit-side-outline, #2d9d5f),
+    0 0 0 4px #ffc34d,
+    0 0 12px rgb(255 188 61 / 0.72);
+}
+.unit-v4.top.inspected,
+.unit-layer-v4 .unit-token:focus-visible .unit-v4.top {
+  --unit-side-outline: #d0443c;
 }
 
 .unit-v4.acting {
@@ -1854,6 +1891,119 @@ nav {
   color: #fff;
   font-size: 0.62rem;
   font-weight: 800;
+}
+
+.unit-inspector {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 9px;
+  width: min(224px, calc(100vw - 16px));
+  max-height: min(280px, calc(100dvh - 16px));
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid #b9c6bd;
+  border-radius: 10px;
+  background: rgb(251 253 250 / 0.98);
+  box-shadow: 0 8px 24px rgb(18 37 28 / 0.26);
+  color: #21372f;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.unit-inspector.bottom {
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: min(440px, calc(100vw - 16px));
+  margin: 0 auto;
+}
+
+.unit-inspector-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.unit-inspector-stance {
+  flex: none;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #f5dfda;
+  color: #7b302b;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.unit-inspector-stance.defense {
+  background: #dce9f4;
+  color: #285c91;
+}
+
+.unit-inspector-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.unit-inspector-stats > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 4px 5px;
+  border-radius: 6px;
+  background: #edf3ee;
+}
+
+.unit-inspector-stats dt {
+  color: #52645a;
+  font-size: 0.68rem;
+}
+
+.unit-inspector-stats dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-weight: 800;
+}
+
+.unit-inspector-stats .ico {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.unit-inspector-statuses {
+  display: grid;
+  gap: 5px;
+}
+
+.unit-inspector-statuses > strong {
+  font-size: 0.72rem;
+}
+
+.unit-inspector-statuses ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unit-inspector-statuses li {
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  border-left: 3px solid #8060a7;
+  border-radius: 4px;
+  background: #f2edf7;
+}
+
+.unit-inspector-statuses small {
+  color: #536058;
+  font-size: 0.69rem;
 }
 
 .tower-row {

@@ -6,6 +6,7 @@ import {
   type AuthProviders,
   type AuthUser,
   type CombatCatalogCard,
+  type CombatStatusDefinition,
   type CollectionCard,
   getAuthProviders,
   getCollection,
@@ -70,14 +71,18 @@ function App() {
   );
   // Combat catalog (v4): battle needs card data (art, cost, coverage, spawn
   // zone) for any card id — hand, spells, bot units — regardless of ownership.
-  const catalogState = useServerResource<CombatCatalogCard[]>(
-    () => getCombatCatalog().then((payload) => payload.cards),
+  const catalogState = useServerResource<{
+    cards: CombatCatalogCard[];
+    statuses: CombatStatusDefinition[];
+  }>(
+    getCombatCatalog,
     [],
-    [],
+    { cards: [], statuses: [] },
   );
   const profile = profileState.data;
   const collection = collectionState.data;
-  const catalog = catalogState.data;
+  const catalog = catalogState.data.cards;
+  const statusCatalog = catalogState.data.statuses;
 
   async function handleRequestCode() {
     setAuthMessage("");
@@ -193,6 +198,7 @@ function App() {
         {route === "battle" && (
           <BattleV4
             cards={catalog}
+            statuses={statusCatalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
         )}
