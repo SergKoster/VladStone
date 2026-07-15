@@ -154,6 +154,10 @@ class CombatEvent(BaseModel):
     # Фаза хода v4 («spells»/«spawn»/«iterations»/«end»/«draw») — для подписей
     # оверлея итераций (§18.3); у MVP-событий отсутствует.
     phase: str | None = None
+    # Структурная причина события способности. Текст message для UI-логики не
+    # используется: on_spawn и on_death должны анимироваться по-разному.
+    ability_trigger: str | None = None
+    effect_kind: str | None = None
     # Полная область визуального эффекта, включая пустые клетки поля.
     affected_cells: list[Position] = Field(default_factory=list)
     snapshot: dict = Field(default_factory=dict)

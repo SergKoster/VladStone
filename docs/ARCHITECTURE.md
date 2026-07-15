@@ -67,10 +67,13 @@
 
 **Контракт combat events** (основа клиентских анимаций):
 `type, actor_id, target_id, target_kind, damage, from/to_position,
-before_hp/after_hp, sequence, micro_step, affected_cells,
+before_hp/after_hp, sequence, micro_step, ability_trigger, effect_kind, affected_cells,
 snapshot{players,units}`. `affected_cells` — полная визуальная область события
 на поле, включая пустые клетки; её вычисляет сервер из того же selector, что и
 реальные цели, а клиент только отображает.
+Для `ability_triggered` `ability_trigger` и `effect_kind` переносят хук и
+примитив эффекта структурно (например `on_death` + `deal_damage`); UI не
+выводит их из `message`, поэтому визуально различает смерть и спавн.
 Срез каждого живого юнита в `snapshot.units` включает также
 `remaining_steps`/`remaining_attacks`: UI уменьшает счётчики действий по кадрам
 серверных событий, а вне реплея показывает полные базовые характеристики.

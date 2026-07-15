@@ -65,6 +65,20 @@ def test_tower_ghost_row_is_valid_in_animation_event() -> None:
     assert event.from_position == EventPosition(row=-1, col=2)
 
 
+def test_ability_fact_keeps_structured_trigger_and_effect_kind() -> None:
+    fact = EngineEvent(
+        kind="ability_triggered",
+        unit_id="red-skull",
+        trigger="on_death",
+        effect_kind="deal_damage",
+        from_cell=(2, 1),
+    )
+    [event] = translate_engine_events([fact])
+    assert event.actor_id == "red-skull"
+    assert event.ability_trigger == "on_death"
+    assert event.effect_kind == "deal_damage"
+
+
 def test_unit_scoped_facts_put_the_unit_into_target_id() -> None:
     heal = EngineEvent(kind="heal", unit_id="u1", amount=3, before=2, after=5, phase="spells")
     status = EngineEvent(kind="status_applied", unit_id="u1", status_id="poison", amount=2)

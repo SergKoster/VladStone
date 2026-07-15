@@ -1618,6 +1618,23 @@ nav {
   animation: cell-effect-wave var(--area-pulse-ms, 680ms) ease-out forwards;
 }
 
+/* Рождение и смерть — разные причины одной области. Красный pulse оставлен
+   именно посмертному урону; входной on_spawn читается как холодная вспышка. */
+.cell-effect-pulse.ability-death {
+  background: rgb(201 54 47 / 0.5);
+  box-shadow:
+    inset 0 0 0 2px rgb(255 104 88 / 0.58),
+    0 0 16px rgb(218 55 44 / 0.48);
+}
+
+.cell-effect-pulse.ability-spawn {
+  background: rgb(62 151 214 / 0.32);
+  box-shadow:
+    inset 0 0 0 2px rgb(118 209 255 / 0.46),
+    0 0 12px rgb(62 151 214 / 0.36);
+  animation-name: cell-spawn-wave;
+}
+
 @keyframes cell-effect-wave {
   0% {
     opacity: 0;
@@ -1642,6 +1659,33 @@ nav {
         calc(var(--row) * (100% + var(--gap)))
       )
       scale(1.04);
+  }
+}
+
+@keyframes cell-spawn-wave {
+  0% {
+    opacity: 0;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(0.42);
+  }
+  48% {
+    opacity: 1;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(1.03);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+        calc(var(--col) * (100% + var(--gap))),
+        calc(var(--row) * (100% + var(--gap)))
+      )
+      scale(0.88);
   }
 }
 

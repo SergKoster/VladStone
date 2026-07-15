@@ -851,7 +851,7 @@ function CellPulseView({ pulse }: { pulse: CellPulse }) {
   return (
     <span
       aria-hidden="true"
-      className="cell-effect-pulse"
+      className={`cell-effect-pulse ${pulse.kind}`}
       style={
         {
           ["--col" as string]: pulse.col,

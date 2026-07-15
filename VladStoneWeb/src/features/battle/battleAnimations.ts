@@ -18,7 +18,16 @@ export type CellPulse = {
   key: number;
   row: number;
   col: number;
+  kind: "spell" | "ability-spawn" | "ability-death" | "ability";
 };
+
+/** Визуал области выбирается по серверной причине, а не по тексту события. */
+export function cellPulseKind(event: CombatEvent): CellPulse["kind"] {
+  if (event.type !== "ability_triggered") return "spell";
+  if (event.ability_trigger === "on_spawn") return "ability-spawn";
+  if (event.ability_trigger === "on_death") return "ability-death";
+  return "ability";
+}
 
 /** Выпад атаки; при коллизии оба участника сходятся в заявленной клетке. */
 export function lungeEffects(event: CombatEvent, match: CombatMatch): LungeEffect[] {

@@ -261,6 +261,7 @@ def _fire_abilities(ctx: EffectContext, unit: UnitState, trigger: TriggerHook):
                 kind="ability_triggered",
                 unit_id=unit.id,
                 trigger=trigger.value,
+                effect_kind=ability.effect.kind,
                 from_cell=(unit.row, unit.col),
                 affected_cells=visual_cells,
             )

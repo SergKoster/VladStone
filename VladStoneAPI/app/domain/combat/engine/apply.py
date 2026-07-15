@@ -100,6 +100,9 @@ class EngineEvent(BaseModel):
     tag: str | None = None
     # Хук, породивший факт (ability_triggered).
     trigger: str | None = None
+    # Примитив Effect, который запускает ability_triggered. Хранится отдельно
+    # от trigger: один хук может как лечить, так и наносить урон.
+    effect_kind: str | None = None
     # Клетки «откуда/куда»: атака — клетка актора → клетка цели; движение/
     # толчок — путь юнита; спавн — to_cell; смерть — from_cell.
     from_cell: tuple[int, int] | None = None

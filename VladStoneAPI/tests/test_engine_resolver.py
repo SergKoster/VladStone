@@ -27,6 +27,7 @@ from app.domain.combat.engine import (
     UnitStats,
     resolve_turn_v4,
     spawn_unit,
+    translate_engine_events,
 )
 from app.domain.combat.engine.apply import board_snapshot
 from app.domain.combat.engine.content import BLUEPRINTS
@@ -571,6 +572,48 @@ def test_c5_death_wave_cascades_through_on_death_bombs() -> None:
     triggered = [event for event in events if event.kind == "ability_triggered"]
     assert triggered[0].affected_cells == [(0, 1), (2, 1)]
     assert unit_ids(ctx) == set()
+
+
+def test_red_skull_death_is_typed_and_precedes_its_area_damage() -> None:
+    ctx = make_ctx(BLUEPRINTS["red_skull"], p1_hand=["bolt_card"])
+    skull = add_unit(ctx, uid="skull", owner="p2", row=2, col=2, bp="red_skull")
+    victim = add_unit(ctx, uid="victim", owner="p1", row=2, col=3)
+
+    facts = resolve(
+        ctx,
+        PlayerIntents(
+            player_id="p1",
+            spells=(SpellIntent(card_id="bolt_card", row=2, col=2),),
+        ),
+        turn=1,
+    )
+    death_index = next(
+        index
+        for index, fact in enumerate(facts)
+        if fact.kind == "unit_died" and fact.unit_id == skull.id
+    )
+    trigger_index, trigger = next(
+        (index, fact)
+        for index, fact in enumerate(facts)
+        if fact.kind == "ability_triggered" and fact.unit_id == skull.id
+    )
+    area_damage_index = next(
+        index
+        for index, fact in enumerate(facts)
+        if fact.kind == "damage" and fact.unit_id == victim.id
+    )
+    assert death_index < trigger_index < area_damage_index
+    assert trigger.trigger == "on_death" and trigger.effect_kind == "deal_damage"
+    assert skull.id not in unit_ids(ctx)
+
+    events = translate_engine_events(facts)
+    skull_trigger = next(
+        event
+        for event in events
+        if event.actor_id == skull.id and event.type.value == "ability_triggered"
+    )
+    assert skull_trigger.ability_trigger == "on_death"
+    assert skull_trigger.effect_kind == "deal_damage"
 
 
 # --- Фазы 5–7: яд, разогрев/ttl, добор и мана ---

@@ -17,6 +17,7 @@ import {
   type BattlePopup,
   type CellPulse,
   type LungeEffect,
+  cellPulseKind,
   lungeEffects,
   popupForEvent,
 } from "./battleAnimations";
@@ -125,12 +126,19 @@ export function useTurnPlayback() {
           setActiveEvent(event);
           armWatchdog();
 
-          if (event.affected_cells.length > 0) {
+          // Область — только самостоятельный эффект заклинания/способности.
+          // HP-события внутри неё не должны повторно запускать ту же волну.
+          if (
+            event.affected_cells.length > 0 &&
+            (event.type === "spell_cast" || event.type === "ability_triggered")
+          ) {
             const pulseKey = ++effectKeyRef.current;
+            const pulseKind = cellPulseKind(event);
             const pulses = event.affected_cells.map((cell, cellIndex) => ({
               key: pulseKey * 1_000 + cellIndex,
               row: cell.row,
               col: cell.col,
+              kind: pulseKind,
             }));
             setCellPulses((existing) => [...existing, ...pulses]);
             scheduleEffect(

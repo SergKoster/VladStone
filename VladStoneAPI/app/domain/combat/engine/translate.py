@@ -69,6 +69,8 @@ def translate_engine_events(
                 # как в MVP-контракте); фаза уходит отдельным полем.
                 micro_step=fact.iteration or 0,
                 phase=fact.phase,
+                ability_trigger=fact.trigger if fact.kind == "ability_triggered" else None,
+                effect_kind=fact.effect_kind if fact.kind == "ability_triggered" else None,
                 affected_cells=[Position(row=row, col=col) for row, col in fact.affected_cells],
                 snapshot=fact.snapshot,
             )

@@ -117,6 +117,10 @@ export type CombatEvent = {
   micro_step: number | null;
   /** Фаза хода v4 (spells/spawn/iterations/end/draw); у MVP-событий null. */
   phase?: string | null;
+  /** Структурный хук способности: нужен для отличия спавна от смерти. */
+  ability_trigger?: string | null;
+  /** Примитив эффекта способности, например deal_damage или heal. */
+  effect_kind?: string | null;
   /** Полная область визуального эффекта, включая пустые клетки поля. */
   affected_cells: Array<{ row: number; col: number }>;
   snapshot: CombatEventSnapshot;
