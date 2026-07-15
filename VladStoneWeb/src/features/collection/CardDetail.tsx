@@ -4,7 +4,13 @@
  */
 import React from "react";
 
-import { type CollectionCard, type CombatCatalogCard, type Rarity } from "../../api";
+import {
+  type CollectionCard,
+  type CombatCatalogCard,
+  type CombatStatusDefinition,
+  type CombatUnit,
+  type Rarity,
+} from "../../api";
 import { CardArt } from "../../shared/cardArt";
 import {
   BootIcon,
@@ -24,39 +30,89 @@ const RARITY_LABEL: Record<Rarity, string> = {
 
 type CollectionMeta = Pick<CollectionCard, "ascension" | "copies">;
 type CoverageCell = { forward: number; col: number };
+type UnitDetailState = Pick<
+  CombatUnit,
+  "attacks_per_turn" | "current_hp" | "damage" | "move_steps" | "stance" | "statuses"
+>;
+
+type DetailAction = {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+};
 
 export function CardDetail({
   card,
   collectionMeta,
+  detailAction,
+  fallbackDescription,
+  fallbackName,
   onClose,
+  statusCatalog = [],
+  unit,
 }: {
-  card: CombatCatalogCard;
+  card?: CombatCatalogCard;
   collectionMeta?: CollectionMeta;
+  detailAction?: DetailAction;
+  fallbackDescription?: string;
+  fallbackName?: string;
   onClose: () => void;
+  statusCatalog?: CombatStatusDefinition[];
+  unit?: UnitDetailState;
 }) {
-  const stats = cardStats(card);
-  const spawnRows = card.spawn_rows?.join("–");
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+  const title = card?.name ?? fallbackName ?? "Боевой токен";
+  const stats = cardStats(card, unit);
+  const spawnRows = card?.spawn_rows?.join("–");
+  const statusById = new Map(statusCatalog.map((status) => [status.id, status]));
+
+  React.useEffect(() => {
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
     <div className="card-detail-backdrop" onClick={onClose}>
       <section
-        aria-label={`Карта ${card.name}`}
+        aria-labelledby="card-detail-title"
+        aria-modal="true"
         className="card-detail-panel"
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
       >
-        <button aria-label="Закрыть" className="card-detail-close" onClick={onClose}>
+        <button
+          aria-label="Закрыть"
+          className="card-detail-close"
+          onClick={onClose}
+          ref={closeButtonRef}
+        >
           ×
         </button>
         <div className="card-detail-body">
           <div className="card-detail-face">
-            <div className="card-detail-art">
-              <CardArt cardId={card.id} label={card.name} rarity={card.rarity} />
-            </div>
+            {card ? (
+              <div className="card-detail-art">
+                <CardArt cardId={card.id} label={card.name} rarity={card.rarity} />
+              </div>
+            ) : (
+              <div className="card-detail-token">Боевой токен</div>
+            )}
             <p className="card-detail-tags">
-              <span className="card-detail-rarity" data-rarity={card.rarity}>
-                {RARITY_LABEL[card.rarity]}
-              </span>
-              <span className="muted">{card.card_type === "unit" ? "Юнит" : "Заклинание"}</span>
+              {card ? (
+                <span className="card-detail-rarity" data-rarity={card.rarity}>
+                  {RARITY_LABEL[card.rarity]}
+                </span>
+              ) : null}
+              <span className="muted">{card?.card_type === "spell" ? "Заклинание" : "Юнит"}</span>
+              {unit ? (
+                <span className={`card-detail-stance ${unit.stance}`}>
+                  {unit.stance === "defense" ? "🛡 Защита" : "⚔ Атака"}
+                </span>
+              ) : null}
               {collectionMeta ? (
                 <span className="muted">
                   {collectionMeta.ascension} · повторки {collectionMeta.copies}/2
@@ -65,7 +121,7 @@ export function CardDetail({
             </p>
           </div>
           <div className="card-detail-info">
-            <h2 className="card-detail-name">{card.name}</h2>
+            <h2 className="card-detail-name" id="card-detail-title">{title}</h2>
             <dl className="card-detail-stats">
               {stats.map((stat) => (
                 <div className="card-detail-stat" key={stat.label}>
@@ -80,10 +136,37 @@ export function CardDetail({
 
             <section className="card-detail-section">
               <h3>Описание</h3>
-              <p>{card.rules_text}</p>
+              <p>{card?.rules_text ?? fallbackDescription ?? "Боевой токен без коллекционной карты."}</p>
             </section>
 
-            {card.card_type === "unit" ? (
+            {unit ? (
+              <section className="card-detail-section card-detail-statuses">
+                <h3>Текущие статусы</h3>
+                {unit.statuses.length ? (
+                  <ul>
+                    {unit.statuses.map((status) => {
+                      const definition = statusById.get(status.id);
+                      const duration = status.ttl !== null
+                        ? ` · ещё ходов: ${status.ttl}`
+                        : definition?.decay === "permanent"
+                          ? " · постоянно"
+                          : "";
+                      return (
+                        <li key={status.id}>
+                          <b>{definition?.name ?? status.id}</b>
+                          {` · стаков: ${status.stacks}${duration}`}
+                          {definition ? <small>{definition.description}</small> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="muted">Нет.</p>
+                )}
+              </section>
+            ) : null}
+
+            {card?.card_type === "unit" ? (
               <>
                 <section className="card-detail-section">
                   <h3>Покрытие</h3>
@@ -106,6 +189,15 @@ export function CardDetail({
                 </section>
               </>
             ) : null}
+            {detailAction ? (
+              <button
+                className="card-detail-action"
+                disabled={detailAction.disabled}
+                onClick={detailAction.onClick}
+              >
+                {detailAction.label}
+              </button>
+            ) : null}
           </div>
         </div>
       </section>
@@ -113,9 +205,22 @@ export function CardDetail({
   );
 }
 
-function cardStats(card: CombatCatalogCard): Array<{ icon: React.ReactNode; label: string; value: number }> {
-  const stats = [{ icon: <ManaIcon />, label: "Мана", value: card.cost }];
-  if (!card.stats) return stats;
+function cardStats(
+  card?: CombatCatalogCard,
+  unit?: UnitDetailState,
+): Array<{ icon: React.ReactNode; label: string; value: number }> {
+  const stats: Array<{ icon: React.ReactNode; label: string; value: number }> = [];
+  if (card) stats.push({ icon: <ManaIcon />, label: "Мана", value: card.cost });
+  if (unit) {
+    stats.push(
+      { icon: <HeartIcon />, label: "Здоровье", value: Math.max(0, unit.current_hp) },
+      { icon: <BurstIcon />, label: "Урон", value: unit.damage },
+      { icon: <SwordIcon />, label: "Атаки за ход", value: unit.attacks_per_turn },
+      { icon: <BootIcon />, label: "Шаги за ход", value: unit.move_steps },
+    );
+    return stats;
+  }
+  if (!card?.stats) return stats;
   stats.push(
     { icon: <HeartIcon />, label: "Здоровье", value: card.stats.hp },
     { icon: <BurstIcon />, label: "Урон", value: card.stats.damage },

@@ -15,6 +15,7 @@ import {
 } from "../../api";
 import { CardArt } from "../../shared/cardArt";
 import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
+import { CardDetail } from "../collection/CardDetail";
 import {
   AREA_PULSE_MS,
   DEATH_FADE_MS,
@@ -60,6 +61,13 @@ type InspectorPlacement =
   | { side: "bottom" };
 
 type InspectedUnit = { unitId: string; placement: InspectorPlacement };
+type CombatDetail = {
+  cardId: string | null;
+  fromHand: boolean;
+  fallbackDescription?: string;
+  fallbackName?: string;
+  unit?: CombatUnit;
+};
 
 export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
@@ -120,6 +128,8 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const inspectedTokenRef = React.useRef<HTMLElement | null>(null);
   const lastInspectorPointerTypeRef = React.useRef<string | null>(null);
   const [inspected, setInspected] = React.useState<InspectedUnit | null>(null);
+  const detailSourceRef = React.useRef<HTMLElement | null>(null);
+  const [detail, setDetail] = React.useState<CombatDetail | null>(null);
 
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
     matchRef.current = nextMatch;
@@ -181,6 +191,36 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     window.setTimeout(() => {
       lastInspectorPointerTypeRef.current = null;
     }, 0);
+  }
+
+  function openDetail(
+    nextDetail: CombatDetail,
+    source: HTMLElement,
+  ) {
+    clearInspectorCloseTimer();
+    setInspected(null);
+    detailSourceRef.current = source;
+    setDetail(nextDetail);
+  }
+
+  function closeDetail() {
+    setDetail(null);
+    window.requestAnimationFrame(() => detailSourceRef.current?.focus());
+  }
+
+  function canChooseCard(cardId: string): boolean {
+    if (busy || isAnimating || isFinished) return false;
+    const card = catalog.get(cardId);
+    if (!card) return false;
+    const plannedCopies = planned.filter((plan) => plan.card_id === cardId).length;
+    const handCopies = (viewer?.hand ?? []).filter((id) => id === cardId).length;
+    return plannedCopies < handCopies && plannedCost + card.cost <= (viewer?.mana ?? 0);
+  }
+
+  function chooseCardFromDetail(cardId: string) {
+    if (!canChooseCard(cardId)) return;
+    setSelected(cardId);
+    closeDetail();
   }
 
   React.useEffect(() => {
@@ -401,11 +441,11 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     return Number.isNaN(row) || Number.isNaN(col) ? null : { row, col };
   }
 
-  function handleCardPointerDown(e: React.PointerEvent, cardId: string) {
-    if (busy || isAnimating || isFinished) return;
+  function handleCardPointerDown(e: React.PointerEvent<HTMLButtonElement>, cardId: string) {
     // Начало нового взаимодействия сбрасывает подавление: настоящий драг мыши
     // может не породить финальный click, и застрявший флаг съел бы следующий.
     suppressClickRef.current = false;
+    if (!canChooseCard(cardId)) return;
     dragRef.current = { cardId, startX: e.clientX, startY: e.clientY, dragging: false };
     // Держим move/up на карте даже после ухода указателя за её пределы.
     try {
@@ -415,7 +455,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     }
   }
 
-  function handleCardPointerMove(e: React.PointerEvent) {
+  function handleCardPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
     const d = dragRef.current;
     if (!d) return;
     const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
@@ -435,7 +475,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     setDragGhost({ x: e.clientX, y: e.clientY, valid, name: card?.name ?? d.cardId });
   }
 
-  function handleCardPointerUp(e: React.PointerEvent) {
+  function handleCardPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
     const d = dragRef.current;
     dragRef.current = null;
     setDragGhost(null);
@@ -445,7 +485,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       const cell = cellFromPoint(e.clientX, e.clientY);
       if (cell) placeCard(d.cardId, cell.row, cell.col);
     } else {
-      setSelected((s) => (s === d.cardId ? null : d.cardId)); // тап — выбор/снятие
+      openDetail({ cardId: d.cardId, fromHand: true }, e.currentTarget);
     }
   }
 
@@ -454,13 +494,13 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     setDragGhost(null);
   }
 
-  function handleCardClick(cardId: string) {
-    // Только клавиатурный/несенсорный путь: тач/мышь обслуживает pointerup.
+  function handleCardClick(cardId: string, source: HTMLButtonElement) {
+    // Тач/мышь обслуживаются pointerup; клавиатурный click открывает detail.
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
     }
-    setSelected((s) => (s === cardId ? null : cardId));
+    openDetail({ cardId, fromHand: true }, source);
   }
 
   async function handleResolve() {
@@ -567,6 +607,14 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const inspectedCoverage = inspectedUnit && inspectedCard
     ? coverageCellsFor(inspectedUnit, inspectedCard, rows, cols)
     : new Set<string>();
+  const detailCard = detail?.cardId ? catalog.get(detail.cardId) : undefined;
+  const detailAction = detail?.fromHand && detailCard
+    ? {
+        label: detailCard.card_type === "unit" ? "Выбрать для постановки" : "Выбрать цель",
+        disabled: !canChooseCard(detailCard.id),
+        onClick: () => chooseCardFromDetail(detailCard.id),
+      }
+    : undefined;
   const boardStyle = {
     ["--area-pulse-ms" as string]: `${AREA_PULSE_MS}ms`,
     ["--cols" as string]: cols,
@@ -598,7 +646,23 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           <span className="rt-status">{realtime}</span>
         </div>
 
-        <TowerRow label="Башни врага" towers={towersOf(enemy?.side ?? "top")} />
+        <TowerRow
+          label="Башни врага"
+          onTowerOpen={(tower, source) =>
+            openDetail(
+              {
+                cardId: null,
+                fromHand: false,
+                fallbackDescription:
+                  "Структура линии. Башня не является коллекционной картой, но её текущее здоровье видно в этом описании.",
+                fallbackName: "Башня",
+                unit: tower,
+              },
+              source,
+            )
+          }
+          towers={towersOf(enemy?.side ?? "top")}
+        />
 
         <div className="phase-overlay-slot">
           <PhaseOverlay label={currentPhaseLabel} />
@@ -666,7 +730,15 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 onInspectorPointerDown={rememberInspectorPointer}
                 onInspectorPointerEnter={(target) => openInspector(unit.id, target)}
                 onInspectorPointerLeave={() => scheduleInspectorClose(unit.id)}
-                onUnitClick={() => handleCellClick(unit.row, unit.col)}
+                onUnitClick={(source) => {
+                  // При уже выбранном заклинании клик по юниту остаётся выбором
+                  // цели; во всех остальных случаях открывается detail (W1d).
+                  if (selected && catalog.get(selected)?.card_type === "spell") {
+                    handleCellClick(unit.row, unit.col);
+                  } else {
+                    openDetail({ cardId: unit.card_id, fromHand: false, unit }, source);
+                  }
+                }}
                 showRemainingActions={isAnimating}
                 targeted={activeEvent?.target_id === unit.id}
                 unit={unit}
@@ -690,7 +762,23 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           ) : null}
         </div>
 
-        <TowerRow label="Твои башни" towers={towersOf(viewer?.side ?? "bottom")} />
+        <TowerRow
+          label="Твои башни"
+          onTowerOpen={(tower, source) =>
+            openDetail(
+              {
+                cardId: null,
+                fromHand: false,
+                fallbackDescription:
+                  "Структура линии. Башня не является коллекционной картой, но её текущее здоровье видно в этом описании.",
+                fallbackName: "Башня",
+                unit: tower,
+              },
+              source,
+            )
+          }
+          towers={towersOf(viewer?.side ?? "bottom")}
+        />
 
         <div className="mana-bar" aria-label="Мана">
           <div
@@ -731,11 +819,9 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 disabled={
                   busy ||
                   isAnimating ||
-                  isFinished ||
-                  isPlanned ||
-                  (!affordable && !isPlanned)
+                  isFinished
                 }
-                onClick={() => handleCardClick(cardId)}
+                onClick={(event) => handleCardClick(cardId, event.currentTarget)}
                 onPointerDown={(e) => handleCardPointerDown(e, cardId)}
                 onPointerMove={handleCardPointerMove}
                 onPointerUp={handleCardPointerUp}
@@ -792,6 +878,17 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       {isFinished && !resultDismissed ? (
         <ResultOverlay match={visibleMatch} onClose={() => setResultDismissed(true)} />
       ) : null}
+      {detail ? (
+        <CardDetail
+          card={detailCard}
+          detailAction={detailAction}
+          fallbackDescription={detail.fallbackDescription}
+          fallbackName={detail.fallbackName}
+          onClose={closeDetail}
+          statusCatalog={statuses}
+          unit={detail.unit}
+        />
+      ) : null}
     </div>
   );
 }
@@ -812,16 +909,30 @@ function waitForRealtimeResolution(
   });
 }
 
-function TowerRow({ label, towers }: { label: string; towers: CombatUnit[] }) {
+function TowerRow({
+  label,
+  onTowerOpen,
+  towers,
+}: {
+  label: string;
+  onTowerOpen: (tower: CombatUnit, source: HTMLButtonElement) => void;
+  towers: CombatUnit[];
+}) {
   return (
     <div className="tower-row" aria-label={label}>
       {towers.map((t) => (
-        <div key={t.id} className={`tower${t.current_hp <= 0 ? " dead" : ""}`}>
+        <button
+          key={t.id}
+          aria-label={`Подробнее: башня, здоровье ${Math.max(0, t.current_hp)}`}
+          className={`tower${t.current_hp <= 0 ? " dead" : ""}`}
+          onClick={(event) => onTowerOpen(t, event.currentTarget)}
+          type="button"
+        >
           <span className="tower-hp">{Math.max(0, t.current_hp)}</span>
           <span className="tower-bar">
             <span style={{ width: `${Math.max(0, (t.current_hp / t.max_hp) * 100)}%` }} />
           </span>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -888,7 +999,7 @@ function UnitToken({
   onInspectorPointerDown: (pointerType: string) => void;
   onInspectorPointerEnter: (target: HTMLElement) => void;
   onInspectorPointerLeave: () => void;
-  onUnitClick: () => void;
+  onUnitClick: (source: HTMLElement) => void;
   showRemainingActions: boolean;
   spawning: boolean;
   targeted: boolean;
@@ -911,7 +1022,7 @@ function UnitToken({
       data-inspector-unit-id={unit.id}
       data-unit-id={unit.id}
       onBlur={onInspectorBlur}
-      onClick={onUnitClick}
+      onClick={(event) => onUnitClick(event.currentTarget)}
       onFocus={(event) => onInspectorFocus(event.currentTarget)}
       onPointerDown={(event) => onInspectorPointerDown(event.pointerType)}
       onPointerEnter={(event) => {
