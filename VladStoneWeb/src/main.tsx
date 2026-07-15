@@ -184,7 +184,11 @@ function App() {
           />
         )}
         {route === "collection" && (
-          <Collection cards={collection} onCollectionChange={collectionState.setData} />
+          <Collection
+            cards={collection}
+            catalog={catalog}
+            onCollectionChange={collectionState.setData}
+          />
         )}
         {route === "battle" && (
           <BattleV4

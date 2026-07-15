@@ -1333,6 +1333,20 @@ nav {
   gap: 8px;
 }
 
+.card-detail-art {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border: 1px solid #c8d2ca;
+  border-radius: 8px;
+  background: #e7ede9;
+}
+
+.card-detail-art > .card-art {
+  position: absolute;
+  inset: 0;
+}
+
 .card-detail-tags {
   display: grid;
   gap: 4px;
@@ -1408,12 +1422,25 @@ nav {
   margin: 0;
 }
 
+.coverage-schemes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coverage-scheme {
+  display: grid;
+  gap: 5px;
+}
+
+.coverage-scheme > strong {
+  font-size: 0.86rem;
+}
+
 .coverage-grid {
   display: grid;
   grid-template-columns: repeat(var(--cov-cols, 5), 1fr);
   gap: 3px;
-  width: min(180px, 60%);
-  margin-bottom: 6px;
   padding: 6px;
   border: 1px dashed #c2ccc4;
   border-radius: 6px;
@@ -1430,6 +1457,15 @@ nav {
   background: #2d5f4d;
 }
 
+.coverage-cell.covered {
+  background: #7eacd0;
+  box-shadow: inset 0 0 0 1px rgb(43 105 156 / 0.55);
+}
+
+.coverage-cell.unit.covered {
+  background: #2d5f4d;
+}
+
 @media (max-width: 760px) {
   .card-detail-body {
     grid-template-columns: 1fr;
@@ -1438,6 +1474,10 @@ nav {
   .card-detail-face {
     justify-self: center;
     width: min(180px, 60%);
+  }
+
+  .coverage-schemes {
+    grid-template-columns: 1fr;
   }
 }
 

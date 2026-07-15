@@ -187,6 +187,9 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
   `assets/rarities/<rarity>.png` через import.meta.glob), `icons.tsx`
   (иконки статов, `currentColor`), `apiClient.ts` (base URL, cookie).
 - Каталог карт приходит с API (`/combat/catalog`) — фронт не хранит статы.
+  `CardDetail` коллекции берёт из него правила, статы, обе схемы покрытия и
+  spawn zone; legacy-объект коллекции передаёт только состояние владения
+  (копии/возвышение) до закрытия split-brain из §8.18.
 - Рука — серверная (`match.players[viewer_id].hand`), планы локально резервируют
   карты руки.
 - i18n: зачаток `src/i18n.ts`; целевое состояние — все строки в каталоге (§7).

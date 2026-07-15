@@ -1,20 +1,16 @@
 /**
- * Detailed card view (collection): the full card face plus every stat spelled
- * out with labels, and placeholder sections for the ability description and the
- * coverage mini-schema. Those two are stubs until combat v4 lands the data
- * (COMBAT_REWORK §16.2 / §20 P0.3) — card mechanics are still designed one by
- * one with the owner, so we show "coming soon" rather than invent text.
+ * Полное v4-описание карты. Presenter получает только viewer-safe каталог и
+ * пригоден и для коллекции, и для будущего detail из боя (W1b).
  */
 import React from "react";
 
-import { type CollectionCard, type Rarity } from "../../api";
-import { Card } from "../../shared/Card";
+import { type CollectionCard, type CombatCatalogCard, type Rarity } from "../../api";
+import { CardArt } from "../../shared/cardArt";
 import {
   BootIcon,
   BurstIcon,
   HeartIcon,
   ManaIcon,
-  RangeIcon,
   SwordIcon,
 } from "../../shared/icons";
 
@@ -26,22 +22,20 @@ const RARITY_LABEL: Record<Rarity, string> = {
   legendary: "Легендарная",
 };
 
-// Placeholder coverage grid. Combat v4 moves the field to 5×5 with per-stance
-// coverage patterns (COMBAT_REWORK §10) — until that data exists we only hint
-// at the unit's own tile so the layout is ready to fill in later.
-const COVERAGE_ROWS = 5;
-const COVERAGE_COLS = 5;
-const COVERAGE_UNIT_CELL = { row: COVERAGE_ROWS - 1, col: Math.floor(COVERAGE_COLS / 2) };
+type CollectionMeta = Pick<CollectionCard, "ascension" | "copies">;
+type CoverageCell = { forward: number; col: number };
 
-export function CardDetail({ card, onClose }: { card: CollectionCard; onClose: () => void }) {
-  const stats: { icon: React.ReactNode; label: string; value: number }[] = [
-    { icon: <ManaIcon />, label: "Мана", value: card.cost },
-    { icon: <HeartIcon />, label: "Здоровье", value: card.hp },
-    { icon: <BurstIcon />, label: "Урон", value: card.damage },
-    { icon: <SwordIcon />, label: "Атаки за ход", value: card.attacks },
-    { icon: <BootIcon />, label: "Шаги за ход", value: card.steps },
-    { icon: <RangeIcon />, label: "Дальность", value: card.range },
-  ];
+export function CardDetail({
+  card,
+  collectionMeta,
+  onClose,
+}: {
+  card: CombatCatalogCard;
+  collectionMeta?: CollectionMeta;
+  onClose: () => void;
+}) {
+  const stats = cardStats(card);
+  const spawnRows = card.spawn_rows?.join("–");
 
   return (
     <div className="card-detail-backdrop" onClick={onClose}>
@@ -55,14 +49,19 @@ export function CardDetail({ card, onClose }: { card: CollectionCard; onClose: (
         </button>
         <div className="card-detail-body">
           <div className="card-detail-face">
-            <Card card={card} />
+            <div className="card-detail-art">
+              <CardArt cardId={card.id} label={card.name} rarity={card.rarity} />
+            </div>
             <p className="card-detail-tags">
               <span className="card-detail-rarity" data-rarity={card.rarity}>
                 {RARITY_LABEL[card.rarity]}
               </span>
-              <span className="muted">
-                {card.ascension} · повторки {card.copies}/2
-              </span>
+              <span className="muted">{card.card_type === "unit" ? "Юнит" : "Заклинание"}</span>
+              {collectionMeta ? (
+                <span className="muted">
+                  {collectionMeta.ascension} · повторки {collectionMeta.copies}/2
+                </span>
+              ) : null}
             </p>
           </div>
           <div className="card-detail-info">
@@ -81,37 +80,100 @@ export function CardDetail({ card, onClose }: { card: CollectionCard; onClose: (
 
             <section className="card-detail-section">
               <h3>Описание</h3>
-              <p className="muted">
-                Текст способности появится с боёвкой v4 — механики карт
-                прорабатываются по одной.
-              </p>
+              <p>{card.rules_text}</p>
             </section>
 
-            <section className="card-detail-section">
-              <h3>Покрытие</h3>
-              <div
-                aria-hidden
-                className="coverage-grid"
-                style={{ ["--cov-cols"]: COVERAGE_COLS } as React.CSSProperties}
-              >
-                {Array.from({ length: COVERAGE_ROWS * COVERAGE_COLS }, (_, index) => {
-                  const row = Math.floor(index / COVERAGE_COLS);
-                  const col = index % COVERAGE_COLS;
-                  const isUnit =
-                    row === COVERAGE_UNIT_CELL.row && col === COVERAGE_UNIT_CELL.col;
-                  return (
-                    <span
-                      className={isUnit ? "coverage-cell unit" : "coverage-cell"}
-                      key={index}
+            {card.card_type === "unit" ? (
+              <>
+                <section className="card-detail-section">
+                  <h3>Покрытие</h3>
+                  <div className="coverage-schemes">
+                    <CoveragePreview
+                      board={card.board}
+                      cells={card.coverage_attack ?? []}
+                      label="Атака"
                     />
-                  );
-                })}
-              </div>
-              <p className="muted">Схема зоны атаки появится с боёвкой v4.</p>
-            </section>
+                    <CoveragePreview
+                      board={card.board}
+                      cells={card.coverage_defense ?? []}
+                      label="Защита"
+                    />
+                  </div>
+                </section>
+                <section className="card-detail-section">
+                  <h3>Постановка</h3>
+                  <p>Ряды от своего края: {spawnRows ?? "—"}.</p>
+                </section>
+              </>
+            ) : null}
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function cardStats(card: CombatCatalogCard): Array<{ icon: React.ReactNode; label: string; value: number }> {
+  const stats = [{ icon: <ManaIcon />, label: "Мана", value: card.cost }];
+  if (!card.stats) return stats;
+  stats.push(
+    { icon: <HeartIcon />, label: "Здоровье", value: card.stats.hp },
+    { icon: <BurstIcon />, label: "Урон", value: card.stats.damage },
+    { icon: <SwordIcon />, label: "Атаки за ход", value: card.stats.attacks_per_turn },
+    { icon: <BootIcon />, label: "Шаги за ход", value: card.stats.move_steps },
+  );
+  if (card.damage_defense != null) {
+    stats.push({ icon: <BurstIcon />, label: "Урон в защите", value: card.damage_defense });
+  }
+  return stats;
+}
+
+function CoveragePreview({
+  board,
+  cells,
+  label,
+}: {
+  board: CombatCatalogCard["board"];
+  cells: CoverageCell[];
+  label: string;
+}) {
+  const unitRow = board.rows - 1;
+  const unitCol = Math.floor(board.cols / 2);
+  const covered = new Set(
+    cells
+      .map(({ forward, col }) => `${unitRow - forward}:${unitCol + col}`)
+      .filter((key) => {
+        const [row, col] = key.split(":").map(Number);
+        return row >= 0 && row < board.rows && col >= 0 && col < board.cols;
+      }),
+  );
+
+  return (
+    <div className="coverage-scheme">
+      <strong>{label}</strong>
+      <div
+        aria-label={`${label}: ${cells.length ? "есть покрытие" : "нет покрытия"}`}
+        className="coverage-grid"
+        style={{ ["--cov-cols" as string]: board.cols } as React.CSSProperties}
+      >
+        {Array.from({ length: board.rows * board.cols }, (_, index) => {
+          const row = Math.floor(index / board.cols);
+          const col = index % board.cols;
+          const isUnit = row === unitRow && col === unitCol;
+          const isCovered = covered.has(`${row}:${col}`);
+          return (
+            <span
+              className={[
+                "coverage-cell",
+                isUnit ? "unit" : "",
+                isCovered ? "covered" : "",
+              ].filter(Boolean).join(" ")}
+              key={index}
+            />
+          );
+        })}
+      </div>
+      {!cells.length ? <span className="muted">Нет покрытия</span> : null}
     </div>
   );
 }

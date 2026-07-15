@@ -1,18 +1,22 @@
 import React from "react";
 
-import { type CollectionCard, ascendCard } from "../../api";
+import { type CollectionCard, type CombatCatalogCard, ascendCard } from "../../api";
 import { Card } from "../../shared/Card";
 import { t } from "../../i18n";
 import { CardDetail } from "./CardDetail";
 
 export function Collection({
   cards,
+  catalog,
   onCollectionChange,
 }: {
   cards: CollectionCard[];
+  catalog: CombatCatalogCard[];
   onCollectionChange: (cards: CollectionCard[]) => void;
 }) {
   const [detailCard, setDetailCard] = React.useState<CollectionCard | null>(null);
+  const catalogById = React.useMemo(() => new Map(catalog.map((card) => [card.id, card])), [catalog]);
+  const detailCatalogCard = detailCard ? catalogById.get(detailCard.id) : null;
 
   async function handleAscend(card: CollectionCard) {
     const payload = await ascendCard(card.id);
@@ -48,8 +52,12 @@ export function Collection({
           </article>
         ))}
       </section>
-      {detailCard ? (
-        <CardDetail card={detailCard} onClose={() => setDetailCard(null)} />
+      {detailCard && detailCatalogCard ? (
+        <CardDetail
+          card={detailCatalogCard}
+          collectionMeta={detailCard}
+          onClose={() => setDetailCard(null)}
+        />
       ) : null}
     </div>
   );
