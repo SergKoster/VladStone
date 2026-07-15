@@ -2,9 +2,29 @@ import {
   type CombatEvent,
   type CombatEventSnapshot,
   type CombatMatch,
+  type CombatResponse,
   type CombatSnapshotUnit,
   type CombatUnit,
 } from "../../api";
+
+/**
+ * Идентификатор уже завершённого сервером хода.
+ *
+ * После обычного резолва сервер переводит planning N -> planning N+1, а при
+ * завершении матча оставляет номер N. Последняя sequence отличает неполный
+ * поток событий от полного при будущем resume/reconnect-контракте.
+ */
+export function responsePlaybackKey(response: CombatResponse): string {
+  const resolvedTurn =
+    response.match.status === "planning"
+      ? Math.max(0, response.match.turn - 1)
+      : response.match.turn;
+  const lastSequence = response.events.reduce(
+    (highest, event) => Math.max(highest, event.sequence ?? -1),
+    -1,
+  );
+  return `${response.match.id}:${resolvedTurn}:${lastSequence}`;
+}
 
 /** Наложить облегчённый снапшот события на полное состояние матча. */
 export function applySnapshot(

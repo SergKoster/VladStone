@@ -28,7 +28,7 @@ import {
   type LungeEffect,
 } from "./battleAnimations";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
-import { phaseLabel } from "./turnPlayback";
+import { phaseLabel, responsePlaybackKey } from "./turnPlayback";
 import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
@@ -47,6 +47,7 @@ const DRAG_THRESHOLD = 6;
 export function BattleV4({ cards, onBattleFinished }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const [match, setMatch] = React.useState<CombatMatch | null>(null);
+  const matchRef = React.useRef<CombatMatch | null>(null);
   const [planned, setPlanned] = React.useState<Planned[]>([]);
   const [selected, setSelected] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -86,6 +87,12 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     name: string;
   } | null>(null);
   const autoSubmittedDeadline = React.useRef<string | null>(null);
+  const realtimePlaybackKeyRef = React.useRef<string | null>(null);
+
+  const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
+    matchRef.current = nextMatch;
+    setMatch(nextMatch);
+  }, []);
 
   const renderedMatch = isAnimating && animatedMatch ? animatedMatch : match;
   const viewer = renderedMatch?.players.find((p) => p.id === renderedMatch.viewer_id) ?? null;
@@ -101,16 +108,56 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   // --- realtime: server-pushed updates (timer resolves, own resolve echo) ---
   React.useEffect(() => {
     if (!match) return undefined;
-    const apply = (payload: CombatResponse) => {
-      setMatch(payload.match);
+    const clearPlans = () => {
       setPlanned([]);
       setSelected(null);
     };
+    const applySnapshot = (payload: CombatResponse) => {
+      // Снапшот при reconnect — авторитетное текущее состояние. Во время
+      // собственного resolve его HTTP-ответ остаётся источником анимации.
+      if (isResolvingRef.current) return;
+      commitMatch(payload.match);
+      clearPlans();
+    };
+    const applyUpdate = (payload: CombatResponse) => {
+      // R1: broadcast собственного resolve может обогнать HTTP-ответ. Не даём
+      // ему показать финальный кадр и не запускаем второй проигрыватель.
+      if (isResolvingRef.current) return;
+      const preMatch = matchRef.current;
+      if (!preMatch) {
+        applySnapshot(payload);
+        return;
+      }
+      clearPlans();
+
+      const advanced =
+        payload.match.turn > preMatch.turn || payload.match.status !== preMatch.status;
+      if (!advanced || payload.events.length === 0) {
+        // Текущий WS-контракт broadcast не несёт события. Для таймерного
+        // резолва остаёмся на серверном финале; когда события появятся, ветка
+        // ниже автоматически включит тот же покадровый плеер.
+        commitMatch(payload.match);
+        return;
+      }
+
+      const playbackKey = responsePlaybackKey(payload);
+      if (realtimePlaybackKeyRef.current === playbackKey) return;
+      realtimePlaybackKeyRef.current = playbackKey;
+      void playTurn(preMatch, payload.events, payload.match, playbackKey)
+        .then((result) => {
+          if (result !== "busy") commitMatch(payload.match);
+        })
+        .catch(() => commitMatch(payload.match))
+        .finally(() => {
+          if (realtimePlaybackKeyRef.current === playbackKey) {
+            realtimePlaybackKeyRef.current = null;
+          }
+        });
+    };
     const disconnect = connectMatchRealtime({
-      isBusy: () => isResolvingRef.current,
       matchId: match.id,
-      onSnapshot: apply,
-      onUpdate: apply,
+      onSnapshot: applySnapshot,
+      onUpdate: applyUpdate,
       onStatus: setRealtime,
     });
     return disconnect;
@@ -182,7 +229,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     setBusy(true);
     try {
       const res = await startCombat();
-      setMatch(res.match);
+      commitMatch(res.match);
       setPlanned([]);
       setSelected(null);
     } finally {
@@ -328,15 +375,15 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
       const res = await resolveCombat(match.id, match.turn, placements, spells);
       setPlanned([]);
       setSelected(null);
-      await playTurn(preMatch, res.events, res.match);
-      setMatch(res.match);
+      await playTurn(preMatch, res.events, res.match, responsePlaybackKey(res));
+      commitMatch(res.match);
       if (res.match.result.status !== "active") onBattleFinished();
     } catch {
       // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
       // подтягиваем авторитетное состояние И чистим планы — они были для
       // прошлого хода, иначе «залипают» на поле поверх нового хода (W5).
       const fresh = await getCombat(match.id).catch(() => null);
-      if (fresh) setMatch(fresh.match);
+      if (fresh) commitMatch(fresh.match);
       setPlanned([]);
       setSelected(null);
     } finally {

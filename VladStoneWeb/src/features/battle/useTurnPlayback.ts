@@ -33,6 +33,8 @@ export function useTurnPlayback() {
   const [dyingIds, setDyingIds] = React.useState<string[]>([]);
   const [spawningIds, setSpawningIds] = React.useState<string[]>([]);
   const isPlayingRef = React.useRef(false);
+  const activePlaybackKeyRef = React.useRef<string | null>(null);
+  const playedPlaybackKeysRef = React.useRef(new Set<string>());
   const generationRef = React.useRef(0);
   const watchdogRef = React.useRef<number | null>(null);
   const effectKeyRef = React.useRef(0);
@@ -72,11 +74,20 @@ export function useTurnPlayback() {
       preMatch: CombatMatch,
       events: CombatEvent[],
       finalMatch: CombatMatch,
-    ): Promise<void> => {
-      // Синхронный замок: два источника результата не запускают корутины
-      // поверх друг друга. Полный дедуп WS-эха остаётся в A6.
-      if (isPlayingRef.current) return;
+      playbackKey: string,
+    ): Promise<"played" | "duplicate" | "busy"> => {
+      // A6: ключ ставится синхронно, раньше первого React-render. Поэтому
+      // HTTP-ответ и WS-эхо одного хода не могут запустить два плеера даже
+      // если пришли в одном event-loop tick.
+      if (
+        activePlaybackKeyRef.current === playbackKey ||
+        playedPlaybackKeysRef.current.has(playbackKey)
+      ) {
+        return "duplicate";
+      }
+      if (isPlayingRef.current) return "busy";
       isPlayingRef.current = true;
+      activePlaybackKeyRef.current = playbackKey;
       const generation = ++generationRef.current;
       let current = preMatch;
 
@@ -85,6 +96,8 @@ export function useTurnPlayback() {
         generationRef.current += 1; // останавливает хвост текущей корутины
         clearWatchdog();
         isPlayingRef.current = false;
+        activePlaybackKeyRef.current = null;
+        playedPlaybackKeysRef.current.add(playbackKey);
         setAnimatedMatch(finalMatch);
         setActiveEvent(null);
         setPhaseEvent(null);
@@ -107,7 +120,7 @@ export function useTurnPlayback() {
 
       try {
         for (let index = 0; index < events.length; index += 1) {
-          if (generationRef.current !== generation) return;
+          if (generationRef.current !== generation) return "played";
           const event = events[index];
           setActiveEvent(event);
           armWatchdog();
@@ -223,7 +236,7 @@ export function useTurnPlayback() {
           if (crossesGroup && following) {
             const beforeSwitch = Math.floor(INTER_ITERATION_PAUSE / 2);
             await pause(beforeSwitch);
-            if (generationRef.current !== generation) return;
+            if (generationRef.current !== generation) return "played";
             setPhaseEvent(following);
             await pause(INTER_ITERATION_PAUSE - beforeSwitch);
             continue;
@@ -237,6 +250,7 @@ export function useTurnPlayback() {
       } finally {
         settleOnFinal();
       }
+      return "played";
     },
     [clearWatchdog, resetEffects, scheduleEffect],
   );
@@ -245,6 +259,8 @@ export function useTurnPlayback() {
     () => () => {
       generationRef.current += 1;
       isPlayingRef.current = false;
+      activePlaybackKeyRef.current = null;
+      playedPlaybackKeysRef.current.clear();
       clearWatchdog();
       clearEffectTimers();
     },

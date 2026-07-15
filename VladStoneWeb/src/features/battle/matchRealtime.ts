@@ -7,13 +7,11 @@ export type MatchRealtimeStatus =
   | "Realtime переподключается...";
 
 export function connectMatchRealtime({
-  isBusy,
   matchId,
   onSnapshot,
   onStatus,
   onUpdate,
 }: {
-  isBusy: () => boolean;
   matchId: string;
   onSnapshot: (payload: CombatResponse) => void;
   onStatus: (status: MatchRealtimeStatus) => void;
@@ -39,7 +37,7 @@ export function connectMatchRealtime({
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as MatchSocketMessage;
-      if (message.type === "pong" || isBusy()) {
+      if (message.type === "pong") {
         return;
       }
       if (message.type === "match.snapshot") {
