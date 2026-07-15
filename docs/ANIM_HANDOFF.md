@@ -50,9 +50,11 @@
 1. В apply.py: helper board_snapshot(ctx) -> dict, читает ЖИВЫЕ юниты
    (current_hp > 0 и не doomed) + игроков:
    {"units":[{id, card_id, side(value), row, col, current_hp, max_hp, stance(value),
-   is_tower}], "players":[{id, mana}]}, где card_id = blueprint_id если он в
+   is_tower, remaining_steps, remaining_attacks}], "players":[{id, mana}]},
+   где card_id = blueprint_id если он в
    content.CARDS иначе None; stance = current_stance(unit, blueprint);
    max_hp = effective_stats(unit, blueprint).hp; is_tower = TAG_TOWER в тегах.
+   remaining_steps/remaining_attacks = текущие бюджеты UnitState после события.
    Units сортировать по id (детерминизм I3).
 2. Добавить поле snapshot: dict в EngineEvent (default пустой dict).
 3. Проставлять event.snapshot = board_snapshot(ctx) в момент создания каждого

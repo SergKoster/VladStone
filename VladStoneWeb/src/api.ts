@@ -139,6 +139,8 @@ export type CombatSnapshotUnit = {
   max_hp: number;
   stance: CombatStance;
   is_tower: boolean;
+  remaining_steps: number;
+  remaining_attacks: number;
 };
 
 export type CombatEventSnapshot = {

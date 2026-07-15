@@ -123,10 +123,10 @@ function mergeSnapshotUnit(
     attacks_per_turn: base?.attacks_per_turn ?? 0,
     stance: snapshot.stance,
     is_tower: snapshot.is_tower,
-    // Снапшот A1 не несёт статусы/бюджеты. Существующие значения сохраняем;
-    // новый короткоживущий токен получает безопасные нейтральные значения.
+    // Статусы пока не входят в облегчённый снапшот, а бюджеты действий нужны
+    // покадрово: после каждого move/attack сервер уже присылает уменьшение.
     statuses: base?.statuses ?? [],
-    remaining_steps: base?.remaining_steps ?? 0,
-    remaining_attacks: base?.remaining_attacks ?? 0,
+    remaining_steps: snapshot.remaining_steps,
+    remaining_attacks: snapshot.remaining_attacks,
   };
 }

@@ -547,6 +547,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                 dying={dyingIds.includes(unit.id)}
                 lunge={lungeByUnit.get(unit.id)}
                 spawning={spawningIds.includes(unit.id)}
+                showRemainingActions={isAnimating}
                 targeted={activeEvent?.target_id === unit.id}
                 unit={unit}
               />
@@ -732,6 +733,7 @@ function UnitToken({
   catalog,
   dying,
   lunge,
+  showRemainingActions,
   spawning,
   targeted,
 }: {
@@ -740,6 +742,7 @@ function UnitToken({
   catalog: Map<string, CombatCatalogCard>;
   dying: boolean;
   lunge?: LungeEffect;
+  showRemainingActions: boolean;
   spawning: boolean;
   targeted: boolean;
 }) {
@@ -790,11 +793,11 @@ function UnitToken({
           </span>
           <span className="unit-v4-stat unit-v4-steps" title="Шаги за ход">
             <BootIcon />
-            {unit.move_steps}
+            {showRemainingActions ? unit.remaining_steps : unit.move_steps}
           </span>
           <span className="unit-v4-stat unit-v4-attacks" title="Атаки за ход">
             <SwordIcon />
-            {unit.attacks_per_turn}
+            {showRemainingActions ? unit.remaining_attacks : unit.attacks_per_turn}
           </span>
           <span className="unit-v4-stat unit-v4-dmg" title="Урон">
             <BurstIcon />

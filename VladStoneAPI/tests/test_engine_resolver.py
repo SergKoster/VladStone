@@ -179,6 +179,8 @@ def test_board_snapshot_contract_and_unit_order_are_deterministic() -> None:
         "max_hp": 4,
         "stance": "attack",
         "is_tower": False,
+        "remaining_steps": 1,
+        "remaining_attacks": 1,
     }
     assert snapshot["units"][1]["card_id"] is None
     assert snapshot["units"][1]["is_tower"] is True
@@ -198,6 +200,32 @@ def test_event_snapshots_capture_new_move_cell_and_exclude_dead_units() -> None:
 
     assert all(event.snapshot for event in move_events)
     assert (moved_unit["row"], moved_unit["col"]) == moved.to_cell
+    assert moved_unit["remaining_steps"] == 0
+
+    attacker_blueprint = make_blueprint(
+        "attacker_snapshot",
+        stats=UnitStats(hp=4, damage=1, attacks_per_turn=2, move_steps=0),
+    )
+    target_blueprint = make_blueprint(
+        "target_snapshot",
+        stats=UnitStats(hp=4, damage=0, attacks_per_turn=0, move_steps=0),
+    )
+    attack_ctx = make_ctx(attacker_blueprint, target_blueprint)
+    attacker = add_unit(
+        attack_ctx,
+        uid="attacker",
+        owner="p1",
+        row=2,
+        col=1,
+        bp="attacker_snapshot",
+    )
+    add_unit(attack_ctx, uid="target", owner="p2", row=1, col=1, bp="target_snapshot")
+    attack_events = resolve(attack_ctx, turn=1)
+    attacked = next(event for event in attack_events if event.kind == "attack")
+    attacked_unit = next(
+        unit for unit in attacked.snapshot["units"] if unit["id"] == attacker.id
+    )
+    assert attacked_unit["remaining_attacks"] == 1
 
     duelist = make_blueprint(
         "duelist_snapshot",

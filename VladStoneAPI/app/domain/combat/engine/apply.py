@@ -174,6 +174,8 @@ def board_snapshot(ctx: EffectContext) -> dict:
                 "max_hp": effective_stats(unit, blueprint).hp,
                 "stance": current_stance(unit, blueprint).value,
                 "is_tower": TAG_TOWER in unit_tags(unit, blueprint),
+                "remaining_steps": unit.remaining_steps,
+                "remaining_attacks": unit.remaining_attacks,
             }
         )
     return {
