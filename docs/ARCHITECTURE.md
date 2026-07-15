@@ -28,7 +28,13 @@
 
 ### 2.1 Домен боя — `app/domain/combat/`
 
-Чистый слой: pydantic-модели, никакого I/O. Модули:
+Чистый слой: pydantic-модели, никакого I/O. **Live-бой с июля 2026 работает
+через `app/domain/combat/engine/` и `BattleStateV4` (`RULESET_VERSION` 3).**
+Модули MVP в корне `domain/combat/` ниже остаются legacy-кодом и частью старых
+тестов, но API/таймер/WS их больше не резолвят. Их нельзя считать источником
+текущих правил или каталога; удалить после переноса коллекции (§8.18).
+
+Legacy-модули MVP:
 
 | Модуль | Ответственность |
 |---|---|
@@ -114,7 +120,7 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
   `last_sequence` и полная `events`. Последний envelope хранится внутри
   `BattleStateV4` (`last_resolved_turn`/`last_events`), поэтому lazy GET и
   reconnect не превращают завершённый ход в eventless-снап.
-- `services/combat_payloads.py`: сериализация матча наружу, **payload
+- `domain/combat/engine/payload.py`: сериализация v4-матча наружу, **payload
   viewer-специфичен** (`viewer_id` в ответе): колода игрока не сериализуется
   никогда (только `deck_count`), рука уходит только её владельцу (остальным —
   пустой список + `hand_count`), `user_id` наружу не отдаётся.
@@ -124,8 +130,9 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
 ### 2.3 Хранилище
 
 SQLAlchemy + Alembic. Таблицы: users, auth_identities, email_login_codes,
-refresh_sessions, audit_log, player_profiles, card_definitions (сид из
-`domain/combat/cards.py`), player_cards (user, card, ascension→убрать, copies),
+refresh_sessions, audit_log, player_profiles, card_definitions (пока legacy-
+проекция из `domain/combat/cards.py`; рассинхрон с live v4 — §8.18),
+player_cards (user, card, ascension→убрать, copies),
 combat_reward_claims (уникальность user+match), combat_matches (**состояние
 матча — JSON-блоб `state_json`**, статус/владелец — колонками для выборок).
 
@@ -154,14 +161,14 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
 
 ## 3. Frontend
 
-- `src/features/battle/` — бой: `Battle.tsx` (оркестрация; **авто-отправка
+- `src/features/battle/` — бой: `BattleV4.tsx` + `useTurnPlayback.ts`
+  (оркестрация и покадровый replay; **авто-отправка
   расстановки за 2 с до дедлайна** — план игрока не теряется по таймеру;
   **watchdog анимаций** — зависший ход принудительно доигрывается до итога за
-  10 с и репортится в телеметрию), `battleAnimations.ts` (эффекты: выпады,
-  попапы урона, тосты клетки), `animationState.ts` (применение снапшотов:
-  монотонность HP, удержание умирающих), `animationConfig.ts` (тайминги;
-  скорость фиксирована — онлайн), `matchRealtime.ts` (WS + статус),
-  `battleState.ts`, hooks.
+  10 с и репортится в телеметрию), `turnPlayback.ts` (применение серверных
+  event snapshots), `battleAnimations.ts` (выпады, попапы, области эффектов),
+  `animationConfig.ts` (тайминги; скорость фиксирована — онлайн),
+  `matchRealtime.ts` (WS + статус).
 - Юниты рендерятся в overlay-слое (`unit-layer`) с transform-позиционированием
   по --col/--row — скольжение между клетками и удары идут CSS-анимациями,
   синхронизированными с серверными событиями (урон применяется в момент удара).
@@ -170,7 +177,8 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
   `assets/rarities/<rarity>.png` через import.meta.glob), `icons.tsx`
   (иконки статов, `currentColor`), `apiClient.ts` (base URL, cookie).
 - Каталог карт приходит с API (`/combat/catalog`) — фронт не хранит статы.
-- Рука — серверная (`match.player_hand`), планы локально резервируют карты руки.
+- Рука — серверная (`match.players[viewer_id].hand`), планы локально резервируют
+  карты руки.
 - i18n: зачаток `src/i18n.ts`; целевое состояние — все строки в каталоге (§7).
 
 ## 4. Ключевые инварианты
@@ -604,9 +612,56 @@ COMBAT_REWORK §23.1.
     журнал применённых намерений по ходам). До движка способностей (нужен явный
     сид для `draw_random`).
 17. **Взаимный AFK — «зомби-матч»** (blindspot, июль 2026): при обоюдной
-    бездеятельности никто не ставит юнитов, башни целы, ничего не бьёт до
-    chip-damage (~100-й ход, DESIGN §3.5) — таймер-воркер крутит пустые ходы.
+    бездеятельности никто не ставит юнитов, а таймер-воркер всё равно резолвит
+    пустые ходы до «суда» (сейчас балансная заглушка в `engine/battle.py`).
     Владелец (июль 2026, O11) отдельный AFK-детектор **вводить не стал**: длину
-    матча держат сжатие таймера (с 15-го хода −1 с/ход, пол 5 с) + chip-damage
-    (§3.5). Замыкание `turns_since_any_placement` ≥ K — резервный вариант, если
-    пустые матчи реально начнут грузить воркер (не сейчас).
+    матча держат сжатие таймера + суд (DESIGN §3.5). Замыкание
+    `turns_since_any_placement` ≥ K — резервный вариант, если пустые матчи
+    реально начнут грузить воркер (не сейчас).
+18. **Split-brain каталога v4 и коллекции — High, до deck builder** (аудит
+    15 июля 2026): live-бой и `/combat/catalog` читают 12 карт из
+    `engine/content.py`, а `accounts.ensure_seed_cards`, `/me/collection`,
+    `_card_rarity` и стартовая выдача продолжают читать legacy
+    `domain/combat/cards.py` (11 карт, статы = 1, старые редкости). Поэтому
+    коллекция показывает характеристики, которые не действуют в бою, не знает
+    `samurai_koster` и продолжает поддерживать отменённое возвышение. Текущий CI
+    это закрепляет `test_auth.py`, а не ловит как ошибку. **Фикс:** один
+    versioned v4 catalog/application service для combat catalog, DB projection,
+    starter grant, collection и будущей deck validation; миграция/seed для уже
+    созданных аккаунтов; contract-тест равенства public collection metadata и
+    live combat catalog. После этого удалить legacy-каталог и его тесты.
+19. **WS broadcast без backpressure — High к PvP/нагрузке** (аудит 15 июля
+    2026): `MatchChannelManager._broadcast` последовательно делает
+    `await websocket.send_json` для каждого сокета без timeout и без очереди.
+    Медленный/зависший клиент задерживает остальных участников; HTTP resolve
+    уже закоммичен, но не возвращает ответ до broadcast, а timer-worker
+    рассылает матчи последовательно и может задержать все следующие матчи.
+    Обрабатывается только `RuntimeError`, не общий timeout/disconnect. **Фикс:**
+    bounded per-connection outbound queue + отдельный sender task, send-timeout,
+    disconnect при переполнении/ошибке; HTTP/DB commit не ждёт медленного клиента;
+    нагрузочный тест с не читающим WS-клиентом.
+20. **Нет лимитов на combat/WS input — High DoS до внешнего деплоя** (аудит
+    15 июля 2026): `ResolveTurnRequest.placements/spells` — списки без `max_length`,
+    строки/координаты почти не ограничены; Caddy/FastAPI не задают общий body
+    limit. WS принимает произвольный JSON без лимита сообщения. Это позволяет
+    тратить память/CPU ещё до доменной валидации, а вместе с анонимным
+    `/combat/start` (§8.9) доступно без аккаунта. **Фикс:** лимит request body на
+    proxy/app, строгие Pydantic bounds (длина id, координаты, максимум intents
+    не больше физического лимита руки), WS max message size и rate limit;
+    негативные API-тесты на 413/422/429.
+21. **Google ID token декодируется без проверки подписи/срока — High auth**
+    (аудит 15 июля 2026): `services/google_oauth.py` делает base64 decode payload
+    и вручную проверяет только `aud`/`iss`; JWT signature, `exp`/`iat` и ключ
+    `kid` не валидируются. TLS token exchange не заменяет обязательную
+    OIDC-валидацию полученного identity assertion. **Фикс до входа друзей:**
+    использовать поддерживаемую Google/JWT-библиотеку или JWKS cache; проверять
+    signature, `aud`, `iss`, `exp` (и `azp` при нескольких audiences); тесты на
+    поддельную подпись и истёкший token. Не писать собственный JWT verifier
+    ([официальная server-side verification Google](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
+22. **Python-зависимости production не зафиксированы — release/reproducibility**
+    (аудит 15 июля 2026): `pyproject.toml` задаёт только нижние границы, CI и
+    Docker каждый раз выполняют новый `pip install`, поэтому одинаковый commit
+    может собрать другой набор транзитивных версий или внезапно перестать
+    собираться. Frontend уже имеет `package-lock.json`. **Фикс:** генерируемый
+    lock/constraints с hashes для Python; CI и Docker ставят ровно его;
+    Dependabot/Renovate обновляет отдельными проверяемыми PR.
