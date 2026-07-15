@@ -228,6 +228,15 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   }
 
   function handleCellClick(row: number, col: number) {
+    // Повторный обычный тап по уже запланированной клетке отменяет именно этот
+    // план. Проверяем раньше выбранной карты, чтобы клик не выглядел как
+    // безрезультатный отказ из-за занятой клетки.
+    if (plannedAt(row, col)) {
+      setPlanned((current) =>
+        current.filter((plan) => plan.row !== row || plan.col !== col),
+      );
+      return;
+    }
     if (selected) placeCard(selected, row, col);
   }
 
