@@ -10,6 +10,7 @@ from app.domain.combat.engine.battle import BattleStateV4, build_context
 from app.domain.combat.engine.cards import CardType
 from app.domain.combat.engine.content import BLUEPRINTS, CARDS, V4_COLS, V4_ROWS
 from app.domain.combat.engine.stances import Stance
+from app.domain.combat.engine.statuses import all_status_specs
 from app.domain.combat.engine.tags import TAG_TOWER
 from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import current_stance, effective_stats, unit_tags
@@ -63,6 +64,7 @@ def v4_catalog_payload() -> list[dict]:
             "cost": card.cost,
             "rarity": card.rarity.value,
             "card_type": card.card_type.value,
+            "rules_text": card.rules_text,
             "board": {"rows": V4_ROWS, "cols": V4_COLS},
         }
         if card.card_type == CardType.UNIT:
@@ -83,6 +85,20 @@ def v4_catalog_payload() -> list[dict]:
             entry["spell_id"] = card.spell_id
         cards.append(entry)
     return cards
+
+
+def v4_status_catalog_payload() -> list[dict]:
+    """Публичные значения текущих status id для боевого UI (U4/W1)."""
+    return [
+        {
+            "id": spec.id,
+            "name": spec.name,
+            "description": spec.description,
+            "icon": spec.icon,
+            "decay": spec.decay.value,
+        }
+        for spec in all_status_specs()
+    ]
 
 
 def v4_combat_response(

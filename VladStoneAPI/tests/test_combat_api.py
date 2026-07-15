@@ -28,7 +28,8 @@ def test_card_catalog_is_v4_content() -> None:
     client = TestClient(create_app())
     response = client.get("/api/combat/catalog")
     assert response.status_code == 200
-    cards = {card["id"]: card for card in response.json()["cards"]}
+    payload = response.json()
+    cards = {card["id"]: card for card in payload["cards"]}
     # 12 карт §14.1, все обычные, юниты несут покрытия и зону спавна.
     assert len(cards) == 12
     assert all(card["rarity"] == "common" for card in cards.values())
@@ -36,7 +37,17 @@ def test_card_catalog_is_v4_content() -> None:
     assert bruiser["card_type"] == "unit"
     assert bruiser["stats"]["hp"] == 4 and bruiser["stats"]["damage"] == 2
     assert bruiser["board"] == {"rows": 5, "cols": 5}
+    assert bruiser["rules_text"] == "Обычный боец без особой способности."
     assert cards["banka"]["card_type"] == "spell"
+    statuses = {status["id"]: status for status in payload["statuses"]}
+    assert statuses["poison"] == {
+        "id": "poison",
+        "name": "Яд",
+        "description": "В конце хода носитель получает 1 урон и теряет 1 стак.",
+        "icon": "poison",
+        "decay": "stacks",
+    }
+    assert set(statuses) == {"poison", "forced_stance", "zadanie_mark"}
 
 
 def test_start_serves_a_v4_board_with_towers() -> None:

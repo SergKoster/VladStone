@@ -10,7 +10,11 @@ from app.api.schemas import ResolveTurnRequest
 from app.db.session import get_db
 from app.domain.combat.engine.battle import create_v4_battle, resolve_v4_turn
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
-from app.domain.combat.engine.payload import v4_catalog_payload, v4_combat_response
+from app.domain.combat.engine.payload import (
+    v4_catalog_payload,
+    v4_combat_response,
+    v4_status_catalog_payload,
+)
 from app.domain.combat.helpers import human_players
 from app.domain.combat.models import MatchLifecycleStatus
 from app.realtime.match_channels import match_channel_manager
@@ -41,7 +45,7 @@ STALE_MATCH_TTL_HOURS = 24
 
 @router.get("/catalog")
 def get_card_catalog() -> dict:
-    return {"cards": v4_catalog_payload()}
+    return {"cards": v4_catalog_payload(), "statuses": v4_status_catalog_payload()}
 
 
 @router.post("/start")

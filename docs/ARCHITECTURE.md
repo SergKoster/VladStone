@@ -84,6 +84,10 @@ snapshot{players,units}`. `affected_cells` — полная визуальная
 `defense_no_target|attack_no_target|path_blocked|no_action_budget`; он только
 объясняет отсутствие действия и не меняет поле, бюджет или правила. Клиент
 показывает локализованный бейдж по enum, а не выводит причину по стойке/каталогу.
+`GET /combat/catalog` отдаёт `cards` с `rules_text` и отдельный viewer-safe
+`statuses`-словарь (`id`, имя, короткое описание, icon-key, decay). Текущие
+стаки и ttl принадлежат конкретному unit payload; описание статуса не живёт во
+фронтовом дублирующем словаре (U4/W1a).
 Срез каждого живого юнита в `snapshot.units` включает также
 `remaining_steps`/`remaining_attacks`: UI уменьшает счётчики действий по кадрам
 серверных событий, а вне реплея показывает полные базовые характеристики.

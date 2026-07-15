@@ -198,13 +198,16 @@ SPELLS: dict[str, SpellScript] = {
 }
 
 
-def _card(card_id: str, name: str, cost: int, *, spell: bool = False) -> CardDefinition:
+def _card(
+    card_id: str, name: str, cost: int, rules_text: str, *, spell: bool = False
+) -> CardDefinition:
     return CardDefinition(
         id=card_id,
         name=name,
         cost=cost,
         rarity=Rarity.COMMON,  # стартовые выдаются сразу (DESIGN §4.2)
         card_type=CardType.SPELL if spell else CardType.UNIT,
+        rules_text=rules_text,
         blueprint_id=None if spell else card_id,
         spell_id=card_id if spell else None,
     )
@@ -213,18 +216,77 @@ def _card(card_id: str, name: str, cost: int, *, spell: bool = False) -> CardDef
 CARDS: dict[str, CardDefinition] = {
     card.id: card
     for card in (
-        _card("test_bruiser", "Толстяк", 3),
-        _card("banka", "Банка", 2, spell=True),
-        _card("red_skull", "Красный череп", 1),
-        _card("test_ranger", "Дальник", 3),
-        _card("dolbiki", "Долбики", 3),
-        _card("mushrooms", "Грибной лес", 3, spell=True),
-        _card("matesha", "Матеша", 2),
-        _card("evil_dolbiki", "Злые Долбики", 5),
-        _card("matesha_plus", "Матеша+", 6),
-        _card("epic_serega", "Эпик Серёга", 5),
-        _card("zadanie", "Задание", 4, spell=True),
-        _card("samurai_koster", "СамурайKoster", 4),
+        _card("test_bruiser", "Толстяк", 3, "Обычный боец без особой способности."),
+        _card(
+            "banka",
+            "Банка",
+            2,
+            (
+                "Накладывает на выбранного юнита Яд 3: в конце хода он получает 1 урон "
+                "и теряет 1 стак."
+            ),
+            spell=True,
+        ),
+        _card(
+            "red_skull",
+            "Красный череп",
+            1,
+            "После смерти наносит 2 урона всем юнитам в области 3×3, включая союзников.",
+        ),
+        _card(
+            "test_ranger",
+            "Дальник",
+            3,
+            "Первые 2 хода стоит в Защите, затем переходит в Атаку.",
+        ),
+        _card("dolbiki", "Долбики", 3, "Совершает 2 атаки и делает 2 шага за ход."),
+        _card(
+            "mushrooms",
+            "Грибной лес",
+            3,
+            "Лечит юнита в выбранной клетке на 2, а юнитам по кресту вокруг наносит 2 урона.",
+            spell=True,
+        ),
+        _card(
+            "matesha",
+            "Матеша",
+            2,
+            "Первые 3 хода стоит в Защите и не атакует, затем переходит в Атаку.",
+        ),
+        _card(
+            "evil_dolbiki",
+            "Злые Долбики",
+            5,
+            "При появлении наносят 1 урон всем юнитам в кольце, включая союзников.",
+        ),
+        _card(
+            "matesha_plus",
+            "Матеша+",
+            6,
+            "Первые 4 хода стоит в Защите и не атакует, затем переходит в Атаку.",
+        ),
+        _card(
+            "epic_serega",
+            "Эпик Серёга",
+            5,
+            "Первый ход стоит в Защите; в Защите наносит 5 урона, в Атаке — 3.",
+        ),
+        _card(
+            "zadanie",
+            "Задание",
+            4,
+            (
+                "Клеймо на 1 ход: убей юнита своей атакой и получи +3 здоровья и +1 "
+                "атаку навсегда; иначе носитель погибнет."
+            ),
+            spell=True,
+        ),
+        _card(
+            "samurai_koster",
+            "СамурайKoster",
+            4,
+            "Когда враг погибает в его покрытии, получает +1 шаг до конца текущего хода.",
+        ),
     )
 }
 

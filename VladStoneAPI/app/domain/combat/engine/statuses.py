@@ -56,6 +56,11 @@ class StatusSpec(BaseModel):
     model_config = {"frozen": True}
 
     id: str
+    # Viewer-safe метаданные для инспектора и CardDetail (U4/W1). Хранятся рядом
+    # с механикой статуса, чтобы клиент не поддерживал второй словарь значений.
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    icon: str = Field(min_length=1)
     decay: StatusDecay
     # Тик конца хода (фаза 5): урон/лечение носителю. Яд = tick_damage 1.
     tick_damage: int = Field(default=0, ge=0)
@@ -75,12 +80,31 @@ def _build_specs() -> dict[str, StatusSpec]:
         for spec in (
             # Новый канон яда (§14.1): в конце хода −1 HP И −1 стак;
             # Яд N = N ходов по 1 урона. Стаки складываются.
-            StatusSpec(id=STATUS_POISON, decay=StatusDecay.STACKS, tick_damage=1),
-            StatusSpec(id=STATUS_FORCED_STANCE, decay=StatusDecay.TTL),
+            StatusSpec(
+                id=STATUS_POISON,
+                name="Яд",
+                description="В конце хода носитель получает 1 урон и теряет 1 стак.",
+                icon="poison",
+                decay=StatusDecay.STACKS,
+                tick_damage=1,
+            ),
+            StatusSpec(
+                id=STATUS_FORCED_STANCE,
+                name="Принудительная стойка",
+                description="Временно заменяет врождённую стойку юнита.",
+                icon="stance",
+                decay=StatusDecay.TTL,
+            ),
             # «Задание» (§14.1): клеймо на 1 ход; убил цель своей атакой в
             # этот ход — +3 HP и +1 атака навсегда; нет — казнь.
             StatusSpec(
                 id=STATUS_ZADANIE_MARK,
+                name="Задание",
+                description=(
+                    "До конца хода убей юнита своей атакой: успех даёт +3 здоровья и +1 "
+                    "атаку навсегда, провал убивает носителя."
+                ),
+                icon="quest",
                 decay=StatusDecay.TTL,
                 quest=QuestSpec(
                     condition=QuestCondition.ATTACKED_UNIT_THAT_DIED_THIS_TURN,
@@ -98,18 +122,24 @@ def _build_specs() -> dict[str, StatusSpec]:
 _STATUS_SPECS: dict[str, StatusSpec] | None = None
 
 
-def status_spec(status_id: str) -> StatusSpec:
+def _status_specs() -> dict[str, StatusSpec]:
     global _STATUS_SPECS
     if _STATUS_SPECS is None:
         _STATUS_SPECS = _build_specs()
-    return _STATUS_SPECS[status_id]
+    return _STATUS_SPECS
+
+
+def status_spec(status_id: str) -> StatusSpec:
+    return _status_specs()[status_id]
+
+
+def all_status_specs() -> tuple[StatusSpec, ...]:
+    """Стабильный viewer-safe перечень зарегистрированных статусов."""
+    return tuple(_status_specs()[status_id] for status_id in sorted(_status_specs()))
 
 
 def known_statuses() -> frozenset[str]:
-    global _STATUS_SPECS
-    if _STATUS_SPECS is None:
-        _STATUS_SPECS = _build_specs()
-    return frozenset(_STATUS_SPECS)
+    return frozenset(_status_specs())
 
 
 # Плоский реестр для валидаторов, которым не нужны спеки.

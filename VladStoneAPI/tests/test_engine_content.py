@@ -39,6 +39,7 @@ def test_deck_is_all_twelve_commons_without_duplicates() -> None:
     assert len(set(DECK_CARD_IDS_V4)) == 12
     assert all(CARDS[card_id].rarity == Rarity.COMMON for card_id in DECK_CARD_IDS_V4)
     assert "samurai_koster" in DECK_CARD_IDS_V4
+    assert all(card.rules_text for card in CARDS.values())
 
 
 def test_mana_curve_v4() -> None:

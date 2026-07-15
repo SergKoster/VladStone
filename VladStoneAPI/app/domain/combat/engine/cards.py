@@ -28,6 +28,10 @@ class CardDefinition(BaseModel):
     rarity: Rarity = Rarity.COMMON
     card_type: CardType
     collectible: bool = True
+    # Короткое утверждённое объяснение механики для viewer-safe v4-каталога.
+    # Пустой default сохраняет независимость тестовых фикстур от UI-контента;
+    # живой каталог проверяет непустой текст отдельным контент-тестом.
+    rules_text: str = ""
     blueprint_id: str | None = None
     spell_id: str | None = None
 

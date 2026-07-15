@@ -67,6 +67,8 @@ export type CombatCatalogCard = {
   cost: number;
   rarity: Rarity;
   card_type: "unit" | "spell";
+  /** Утверждённое серверное описание механики, общее для боя и коллекции. */
+  rules_text: string;
   board: { rows: number; cols: number };
   stats?: { hp: number; damage: number; attacks_per_turn: number; move_steps: number };
   coverage_attack?: Array<{ forward: number; col: number }>;
@@ -75,6 +77,15 @@ export type CombatCatalogCard = {
   spawn_rows?: number[];
   damage_defense?: number | null;
   spell_id?: string;
+};
+
+/** Публичное объяснение status id для боевого UI; длительность берётся с юнита. */
+export type CombatStatusDefinition = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  decay: "ttl" | "stacks" | "permanent";
 };
 
 export type CombatEvent = {
@@ -265,7 +276,9 @@ export function getMe() {
 }
 
 export function getCombatCatalog() {
-  return request<{ cards: CombatCatalogCard[] }>("/combat/catalog");
+  return request<{ cards: CombatCatalogCard[]; statuses: CombatStatusDefinition[] }>(
+    "/combat/catalog",
+  );
 }
 
 export function getCollection() {
