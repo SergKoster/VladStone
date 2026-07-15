@@ -73,13 +73,17 @@ Legacy-модули MVP:
 
 **Контракт combat events** (основа клиентских анимаций):
 `type, actor_id, target_id, target_kind, damage, from/to_position,
-before_hp/after_hp, sequence, micro_step, ability_trigger, effect_kind, affected_cells,
+before_hp/after_hp, sequence, micro_step, ability_trigger, effect_kind, wait_reason, affected_cells,
 snapshot{players,units}`. `affected_cells` — полная визуальная область события
 на поле, включая пустые клетки; её вычисляет сервер из того же selector, что и
 реальные цели, а клиент только отображает.
 Для `ability_triggered` `ability_trigger` и `effect_kind` переносят хук и
 примитив эффекта структурно (например `on_death` + `deal_damage`); UI не
 выводит их из `message`, поэтому визуально различает смерть и спавн.
+Для `unit_waited` `wait_reason` — server-authoritative enum
+`defense_no_target|attack_no_target|path_blocked|no_action_budget`; он только
+объясняет отсутствие действия и не меняет поле, бюджет или правила. Клиент
+показывает локализованный бейдж по enum, а не выводит причину по стойке/каталогу.
 Срез каждого живого юнита в `snapshot.units` включает также
 `remaining_steps`/`remaining_attacks`: UI уменьшает счётчики действий по кадрам
 серверных событий, а вне реплея показывает полные базовые характеристики.
@@ -168,7 +172,9 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
   10 с и репортится в телеметрию), `turnPlayback.ts` (применение серверных
   event snapshots), `battleAnimations.ts` (выпады, попапы, области эффектов),
   `animationConfig.ts` (тайминги; скорость фиксирована — онлайн),
-  `matchRealtime.ts` (WS + статус).
+  `matchRealtime.ts` (WS + статус). `unit_waited` временно подсвечивает только
+  указанный сервером токен и выводит его причину; это часть реплея, не
+  клиентский вывод поведения юнита.
 - Юниты рендерятся в overlay-слое (`unit-layer`) с transform-позиционированием
   по --col/--row — скольжение между клетками и удары идут CSS-анимациями,
   синхронизированными с серверными событиями (урон применяется в момент удара).

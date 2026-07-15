@@ -160,6 +160,49 @@ def test_modify_budget_applies_clamps_and_dies_with_the_turn() -> None:
     assert unit.row == 3  # прошёл ровно 1 шаг — базовый бюджет
 
 
+# --- №5.1: U1 — серверное объяснение бездействия ---
+
+
+def test_unit_waited_marks_defender_without_target_once_and_preserves_state() -> None:
+    defender_bp = make_blueprint(
+        "defender",
+        stance_program=StanceProgram.always(Stance.DEFENSE),
+        coverage_defense=CellPattern(),
+    )
+    ctx = make_ctx(defender_bp)
+    defender = add_unit(ctx, uid="defender", owner="p1", row=4, col=1, bp="defender")
+
+    events = resolve(ctx)
+
+    waited = [event for event in events if event.kind == "unit_waited"]
+    assert [(event.unit_id, event.wait_reason) for event in waited] == [
+        ("defender", "defense_no_target")
+    ]
+    assert waited[0].phase == "iterations" and waited[0].iteration == 1
+    assert waited[0].snapshot["units"][0]["id"] == "defender"
+    assert (defender.row, defender.col) == (4, 1)
+    assert defender.remaining_steps == 1 and defender.remaining_attacks == 1
+
+
+def test_unit_waited_reports_blocked_attack_path_without_changing_rules() -> None:
+    attacker_bp = make_blueprint(
+        "attacker",
+        stats=UnitStats(hp=4, damage=2, attacks_per_turn=1, move_steps=1),
+        coverage_attack=CellPattern(),
+    )
+    ctx = make_ctx(attacker_bp)
+    attacker = add_unit(ctx, uid="attacker", owner="p1", row=0, col=1, bp="attacker")
+
+    events = resolve(ctx)
+
+    waited = [event for event in events if event.kind == "unit_waited"]
+    assert [(event.unit_id, event.wait_reason) for event in waited] == [
+        ("attacker", "path_blocked")
+    ]
+    assert (attacker.row, attacker.col) == (0, 1)
+    assert attacker.remaining_steps == 1 and attacker.remaining_attacks == 1
+
+
 # --- №6: наблюдатель смерти (СамурайKoster) ---
 
 

@@ -52,7 +52,7 @@ from app.domain.combat.engine.units import (
     spawn_unit,
 )
 from app.domain.combat.engine.validation import validate_state
-from app.domain.combat.models import PlayerSide, PlayerState
+from app.domain.combat.models import PlayerSide, PlayerState, UnitWaitReason
 
 # Страховка от бесконечной фазы итераций (аналог MVP): юнит с 1 шагом
 # физически не может действовать дольше, чем «высота поля × запас».
@@ -343,16 +343,74 @@ def _run_iterations(ctx: EffectContext) -> list[EngineEvent]:
     # Бюджеты выданы в начале хода (см. resolve_turn_v4) и при спавне —
     # здесь их не трогаем, чтобы не стереть временные бафы спелл-фазы.
     events: list[EngineEvent] = []
+    acted_unit_ids: set[str] = set()
     for iteration in range(1, ctx.rows * ITERATION_SAFETY_FACTOR + 1):
         acted, iteration_events = _run_single_iteration(ctx)
+        acted_unit_ids.update(_acted_unit_ids(iteration_events))
         events += _stamp(iteration_events, "iterations", iteration)
         if not acted:
+            # U1: объяснение добавляется один раз в конце фазы итераций, а не
+            # в каждой пустой микроитерации. Оно не меняет ни бюджет, ни поле.
+            events += _stamp(
+                _unit_wait_events(ctx, acted_unit_ids), "iterations", iteration
+            )
             break
         # Граница итерации — волна смертей (C5); внутри итерации никто не
         # умирал (C3), волна собирает всех ушедших в минус разом.
         events += _stamp(run_death_wave(ctx), "iterations", iteration)
         validate_state(ctx, checkpoint=f"iteration:{iteration}")
     return events
+
+
+def _acted_unit_ids(events: list[EngineEvent]) -> set[str]:
+    """Участники реального действия фазы итераций, не наблюдатели его факта."""
+    ids: set[str] = set()
+    for event in events:
+        if event.kind in {"attack", "moved"} and event.unit_id is not None:
+            ids.add(event.unit_id)
+        elif event.kind == "collision":
+            if event.unit_id is not None:
+                ids.add(event.unit_id)
+            if event.target_id is not None:
+                ids.add(event.target_id)
+    return ids
+
+
+def _unit_wait_events(ctx: EffectContext, acted_unit_ids: set[str]) -> list[EngineEvent]:
+    """Один серверный факт U1 для каждого живого юнита без действия за ход."""
+    events: list[EngineEvent] = []
+    for unit in sorted(ctx.units, key=lambda item: (item.row, item.col, item.id)):
+        if unit.id in acted_unit_ids:
+            continue
+        blueprint = ctx.blueprint_of(unit)
+        events.append(
+            _event(
+                ctx,
+                kind="unit_waited",
+                unit_id=unit.id,
+                wait_reason=_unit_wait_reason(ctx, unit, current_stance(unit, blueprint)),
+                from_cell=(unit.row, unit.col),
+            )
+        )
+    return events
+
+
+def _unit_wait_reason(
+    ctx: EffectContext, unit: UnitState, stance: Stance
+) -> UnitWaitReason:
+    if unit.remaining_attacks <= 0 and unit.remaining_steps <= 0:
+        return UnitWaitReason.NO_ACTION_BUDGET
+    if stance == Stance.DEFENSE:
+        return UnitWaitReason.DEFENSE_NO_TARGET
+    if unit.remaining_steps <= 0:
+        return UnitWaitReason.ATTACK_NO_TARGET
+    ahead = (unit.row + forward_direction(unit.side), unit.col)
+    if not (0 <= ahead[0] < ctx.rows) or ctx.unit_at(*ahead) is not None:
+        return UnitWaitReason.PATH_BLOCKED
+    # При ненулевом бюджете и свободном пути сюда по правилам не попасть:
+    # юнит должен был бы сделать ход. Оставляем серверный fallback, а не
+    # заставляем клиент угадывать причину.
+    return UnitWaitReason.ATTACK_NO_TARGET
 
 
 def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:

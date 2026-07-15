@@ -53,7 +53,7 @@ from app.domain.combat.engine.units import (
     spawn_unit,
     unit_tags,
 )
-from app.domain.combat.models import PlayerSide, PlayerState
+from app.domain.combat.models import PlayerSide, PlayerState, UnitWaitReason
 
 # Кэп руки v4 (§18.2/E3): добор при полной руке пропускается, карта остаётся
 # в колоде.
@@ -78,6 +78,7 @@ class EngineEvent(BaseModel):
         "fizzled",
         "stat_buffed",
         "budget_modified",
+        "unit_waited",
         # Факты резолвера (P2.10):
         "spell_cast",
         "spawned",
@@ -103,6 +104,8 @@ class EngineEvent(BaseModel):
     # Примитив Effect, который запускает ability_triggered. Хранится отдельно
     # от trigger: один хук может как лечить, так и наносить урон.
     effect_kind: str | None = None
+    # U1: причина, по которой юнит не использовал действие в этом ходу.
+    wait_reason: UnitWaitReason | None = None
     # Клетки «откуда/куда»: атака — клетка актора → клетка цели; движение/
     # толчок — путь юнита; спавн — to_cell; смерть — from_cell.
     from_cell: tuple[int, int] | None = None

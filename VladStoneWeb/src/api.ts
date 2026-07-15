@@ -103,7 +103,10 @@ export type CombatEvent = {
     | "executed"
     | "card_drawn"
     | "mana_changed"
-    | "fizzled";
+    | "fizzled"
+    | "stat_buffed"
+    | "budget_modified"
+    | "unit_waited";
   message: string;
   actor_id: string | null;
   target_id: string | null;
@@ -121,6 +124,13 @@ export type CombatEvent = {
   ability_trigger?: string | null;
   /** Примитив эффекта способности, например deal_damage или heal. */
   effect_kind?: string | null;
+  /** Серверная причина, почему юнит не совершил действия за ход (U1). */
+  wait_reason?:
+    | "defense_no_target"
+    | "attack_no_target"
+    | "path_blocked"
+    | "no_action_budget"
+    | null;
   /** Полная область визуального эффекта, включая пустые клетки поля. */
   affected_cells: Array<{ row: number; col: number }>;
   snapshot: CombatEventSnapshot;

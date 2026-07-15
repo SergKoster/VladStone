@@ -49,6 +49,21 @@ class CombatEventType(StrEnum):
     FIZZLED = "fizzled"
     STAT_BUFFED = "stat_buffed"
     BUDGET_MODIFIED = "budget_modified"
+    # Наблюдаемое объяснение бездействия из v4-резолвера (U1).
+    UNIT_WAITED = "unit_waited"
+
+
+class UnitWaitReason(StrEnum):
+    """Почему живой юнит не совершил действия за ход (U1).
+
+    Это объяснение серверного решения, а не команда и не часть состояния боя.
+    Клиент показывает локализованный текст по enum, а не разбирает `message`.
+    """
+
+    DEFENSE_NO_TARGET = "defense_no_target"
+    ATTACK_NO_TARGET = "attack_no_target"
+    PATH_BLOCKED = "path_blocked"
+    NO_ACTION_BUDGET = "no_action_budget"
 
 
 class CombatTargetKind(StrEnum):
@@ -158,6 +173,8 @@ class CombatEvent(BaseModel):
     # используется: on_spawn и on_death должны анимироваться по-разному.
     ability_trigger: str | None = None
     effect_kind: str | None = None
+    # Структурная причина наблюдаемого unit_waited (U1).
+    wait_reason: UnitWaitReason | None = None
     # Полная область визуального эффекта, включая пустые клетки поля.
     affected_cells: list[Position] = Field(default_factory=list)
     snapshot: dict = Field(default_factory=dict)

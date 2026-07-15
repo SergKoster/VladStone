@@ -11,3 +11,4 @@ export const POPUP_TTL_MS = 900;
 export const AREA_PULSE_MS = 680;
 export const PHASE_OVERLAY_FADE_MS = 220;
 export const WATCHDOG_MS = 8_000;
+export const UNIT_WAITED_MS = 760;

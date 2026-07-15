@@ -11,6 +11,7 @@ import {
   MOVE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
+  UNIT_WAITED_MS,
   WATCHDOG_MS,
 } from "./animationConfig";
 import {
@@ -33,6 +34,9 @@ export function useTurnPlayback() {
   const [cellPulses, setCellPulses] = React.useState<CellPulse[]>([]);
   const [dyingIds, setDyingIds] = React.useState<string[]>([]);
   const [spawningIds, setSpawningIds] = React.useState<string[]>([]);
+  const [waitedUnits, setWaitedUnits] = React.useState<
+    Array<{ unitId: string; reason: NonNullable<CombatEvent["wait_reason"]> }>
+  >([]);
   const isPlayingRef = React.useRef(false);
   const activePlaybackKeyRef = React.useRef<string | null>(null);
   const playedPlaybackKeysRef = React.useRef(new Set<string>());
@@ -60,6 +64,7 @@ export function useTurnPlayback() {
     setCellPulses([]);
     setDyingIds([]);
     setSpawningIds([]);
+    setWaitedUnits([]);
   }, [clearEffectTimers]);
 
   const scheduleEffect = React.useCallback((callback: () => void, ms: number) => {
@@ -105,6 +110,7 @@ export function useTurnPlayback() {
         setLunges([]);
         setDyingIds([]);
         setSpawningIds([]);
+        setWaitedUnits([]);
         setIsAnimating(false);
       };
       const armWatchdog = () => {
@@ -166,6 +172,21 @@ export function useTurnPlayback() {
             scheduleEffect(
               () => setPopups((existing) => existing.filter((item) => item.key !== popup.key)),
               POPUP_TTL_MS,
+            );
+          }
+
+          if (event.type === "unit_waited" && event.actor_id && event.wait_reason) {
+            const waited = { unitId: event.actor_id, reason: event.wait_reason };
+            setWaitedUnits((existing) => [
+              ...existing.filter((item) => item.unitId !== waited.unitId),
+              waited,
+            ]);
+            scheduleEffect(
+              () =>
+                setWaitedUnits((existing) =>
+                  existing.filter((item) => item.unitId !== waited.unitId),
+                ),
+              UNIT_WAITED_MS,
             );
           }
 
@@ -286,6 +307,7 @@ export function useTurnPlayback() {
     playTurn,
     popups,
     spawningIds,
+    waitedUnits,
   };
 }
 

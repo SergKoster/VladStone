@@ -5,7 +5,7 @@ from typing import get_args
 import pytest
 
 from app.domain.combat.engine import EngineEvent, translate_engine_events
-from app.domain.combat.models import CombatEventType, EventPosition, Position
+from app.domain.combat.models import CombatEventType, EventPosition, Position, UnitWaitReason
 
 
 def all_engine_kinds() -> list[str]:
@@ -89,6 +89,22 @@ def test_unit_scoped_facts_put_the_unit_into_target_id() -> None:
     assert heal_event.damage is None  # рост HP — не урон, попапом урона не идёт
     assert status_event.type == CombatEventType.STATUS_APPLIED
     assert "poison" in status_event.message
+
+
+def test_waited_fact_keeps_the_server_reason() -> None:
+    fact = EngineEvent(
+        kind="unit_waited",
+        unit_id="matesha",
+        wait_reason=UnitWaitReason.DEFENSE_NO_TARGET,
+        from_cell=(3, 1),
+        phase="iterations",
+        iteration=2,
+    )
+    [event] = translate_engine_events([fact])
+    assert event.type == CombatEventType.UNIT_WAITED
+    assert event.actor_id == "matesha"
+    assert event.wait_reason == UnitWaitReason.DEFENSE_NO_TARGET
+    assert event.from_position == EventPosition(row=3, col=1)
 
 
 def test_player_facts_and_sequence_numbering() -> None:

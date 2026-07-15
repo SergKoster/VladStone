@@ -2,6 +2,7 @@ import React from "react";
 
 import {
   type CombatCatalogCard,
+  type CombatEvent,
   type CombatMatch,
   type CombatResponse,
   type CombatUnit,
@@ -21,6 +22,7 @@ import {
   PHASE_OVERLAY_FADE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
+  UNIT_WAITED_MS,
 } from "./animationConfig";
 import {
   type BattlePopup,
@@ -65,6 +67,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     playTurn,
     popups,
     spawningIds,
+    waitedUnits,
   } = useTurnPlayback();
   // Синхронный флаг для WS-обработчика: React-state обновляется не сразу, а
   // echo собственного resolve может прилететь раньше HTTP-ответа и показать
@@ -460,6 +463,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
   const visibleMatch = renderedMatch ?? match;
   const currentPhaseLabel = phaseLabel(phaseEvent);
   const lungeByUnit = new Map(lunges.map((lunge) => [lunge.unitId, lunge]));
+  const waitReasonByUnit = new Map(waitedUnits.map((waited) => [waited.unitId, waited.reason]));
   const visibleUnits = visibleMatch.units
     .filter((unit) => !unit.is_tower)
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -472,6 +476,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
     ["--rows" as string]: rows,
     ["--spawn-ms" as string]: `${SPAWN_MS}ms`,
     ["--strike-ms" as string]: `${LUNGE_MS}ms`,
+    ["--unit-waited-ms" as string]: `${UNIT_WAITED_MS}ms`,
   } as React.CSSProperties;
 
   return (
@@ -550,6 +555,7 @@ export function BattleV4({ cards, onBattleFinished }: Props) {
                 showRemainingActions={isAnimating}
                 targeted={activeEvent?.target_id === unit.id}
                 unit={unit}
+                waitReason={waitReasonByUnit.get(unit.id)}
               />
             ))}
             {popups.map((popup) => (
@@ -736,6 +742,7 @@ function UnitToken({
   showRemainingActions,
   spawning,
   targeted,
+  waitReason,
 }: {
   acting: boolean;
   unit: CombatUnit;
@@ -745,6 +752,7 @@ function UnitToken({
   showRemainingActions: boolean;
   spawning: boolean;
   targeted: boolean;
+  waitReason?: NonNullable<CombatEvent["wait_reason"]>;
 }) {
   const card = unit.card_id ? catalog.get(unit.card_id) : null;
   return (
@@ -784,6 +792,7 @@ function UnitToken({
             `stance-${unit.stance}`,
             acting ? "acting" : "",
             targeted ? "targeted" : "",
+            waitReason ? "waiting" : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -822,9 +831,23 @@ function UnitToken({
             </span>
           ) : null}
         </span>
+        {waitReason ? <span className="unit-wait-badge">{unitWaitLabel(waitReason)}</span> : null}
       </span>
     </span>
   );
+}
+
+function unitWaitLabel(reason: NonNullable<CombatEvent["wait_reason"]>) {
+  switch (reason) {
+    case "defense_no_target":
+      return "🛡 Защита: нет цели";
+    case "attack_no_target":
+      return "⚔ Атака: нет цели";
+    case "path_blocked":
+      return "Путь заблокирован";
+    case "no_action_budget":
+      return "Нет действий";
+  }
 }
 
 function DamagePopupView({ popup }: { popup: BattlePopup }) {

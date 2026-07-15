@@ -38,6 +38,7 @@ _KIND_TO_TYPE: dict[str, CombatEventType] = {
     "fizzled": CombatEventType.FIZZLED,
     "stat_buffed": CombatEventType.STAT_BUFFED,
     "budget_modified": CombatEventType.BUDGET_MODIFIED,
+    "unit_waited": CombatEventType.UNIT_WAITED,
 }
 
 
@@ -71,6 +72,7 @@ def translate_engine_events(
                 phase=fact.phase,
                 ability_trigger=fact.trigger if fact.kind == "ability_triggered" else None,
                 effect_kind=fact.effect_kind if fact.kind == "ability_triggered" else None,
+                wait_reason=fact.wait_reason if fact.kind == "unit_waited" else None,
                 affected_cells=[Position(row=row, col=col) for row, col in fact.affected_cells],
                 snapshot=fact.snapshot,
             )
@@ -157,6 +159,8 @@ def _message(fact: EngineEvent) -> str:
             return f"{fact.unit_id} gained a permanent buff"
         case "budget_modified":
             return f"{fact.unit_id} action budget changed by {fact.amount}"
+        case "unit_waited":
+            return f"{fact.unit_id} waited ({fact.wait_reason})"
     raise ValueError(f"Engine fact kind {fact.kind!r} has no message")  # недостижимо
 
 

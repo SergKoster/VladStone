@@ -1570,6 +1570,37 @@ nav {
   animation: unit-targeted 420ms ease-out;
 }
 
+.unit-v4.waiting {
+  animation: unit-waited var(--unit-waited-ms, 760ms) ease-out both;
+}
+
+.unit-wait-badge {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  width: max-content;
+  max-width: min(170px, 46vw);
+  padding: 3px 6px;
+  border: 1px solid rgb(208 222 237 / 0.9);
+  border-radius: 5px;
+  transform: translateX(-50%);
+  background: rgb(29 54 78 / 0.94);
+  box-shadow: 0 2px 8px rgb(12 27 42 / 0.34);
+  color: #fff;
+  font-size: clamp(0.57rem, 2.1cqi, 0.72rem);
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  pointer-events: none;
+}
+
+@keyframes unit-waited {
+  0% { filter: brightness(1); }
+  28% { filter: brightness(1.16) saturate(0.82); }
+  100% { filter: brightness(0.94) saturate(0.88); }
+}
+
 @keyframes unit-targeted {
   45% {
     filter: brightness(1.28) saturate(1.35);
