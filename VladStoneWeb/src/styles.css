@@ -1661,15 +1661,163 @@ nav {
     0 0 0 2px #7fca97;
 }
 
-.plan-mark {
-  font-size: 0.6rem;
-  font-weight: 700;
-  color: #2f68a3;
-  text-align: center;
-  line-height: 1.05;
+/* U5/W6: план на клетке — полупрозрачный синий превью-токен с артом карты.
+   pointer-events: none — клики достаются клетке, отмена плана сохраняется. */
+.planned-preview {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px #2f7fd0;
+  background: rgb(47 127 208 / 0.16);
+  opacity: 0.62;
+  pointer-events: none;
 }
-.plan-mark.spell {
+.planned-preview-art {
+  position: absolute;
+  inset: 0;
+}
+.planned-preview-art .card-art {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+.planned-preview-stats {
+  position: absolute;
+  top: 4%;
+  left: 4%;
+  display: inline-flex;
+  gap: 5px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgb(238 243 239 / 0.92);
+  color: #16201b;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+.planned-preview-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.planned-preview-stats .ico {
+  width: 10px;
+  height: 10px;
+  flex: none;
+}
+.planned-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 5%;
+  transform: translateX(-50%);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #2f68a3;
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.planned-badge.spell {
+  background: #8a4bc0;
+}
+
+/* Спелл-план лежит на занятой клетке — фиолетовый маркер цели поверх юнита
+   в overlay-слое; клики пропускает (отмена — кликом по юниту или из сводки). */
+.planned-target {
+  position: absolute;
+  z-index: 3;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 2px rgb(138 75 192 / 0.9),
+    0 0 10px rgb(138 75 192 / 0.35);
+  background: rgb(138 75 192 / 0.16);
+  pointer-events: none;
+}
+
+/* U5 (§24.1): сводка плана рядом с кнопкой завершения хода. */
+.plan-summary {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #cfdbd3;
+  border-radius: 10px;
+  background: #f7faf7;
+  font-size: 0.78rem;
+}
+.plan-summary-selected {
+  margin: 0;
+  color: #2f68a3;
+}
+.plan-summary-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #16201b;
+}
+.plan-summary-head span {
+  color: #6b7d75;
+  font-size: 0.72rem;
+}
+.plan-summary-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-summary-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plan-summary-kind {
+  flex: none;
+}
+.plan-summary-kind.spell {
   color: #8a4bc0;
+}
+.plan-summary-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.plan-summary-cost {
+  flex: none;
+  color: #2f68a3;
+  font-weight: 800;
+}
+.plan-summary-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #cfdbd3;
+  border-radius: 6px;
+  background: #fff;
+  color: #8a2f2f;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+.plan-summary-remove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.plan-summary-clear {
+  justify-self: start;
 }
 
 .unit-v4 {

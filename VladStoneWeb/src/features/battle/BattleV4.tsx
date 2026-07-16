@@ -696,9 +696,9 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                   onClick={() => handleCellClick(row, col)}
                 >
                   {plan && !unit ? (
-                    <span className={`plan-mark ${plan.kind}`}>
-                      {catalog.get(plan.card_id)?.name ?? plan.card_id}
-                    </span>
+                    // U5/W6: план юнита — полупрозрачный синий превью-токен.
+                    // pointer-events: none — клик по клетке отменяет план.
+                    <PlannedPreview card={catalog.get(plan.card_id)} />
                   ) : null}
                 </button>
               );
@@ -734,6 +734,15 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 onInspectorPointerEnter={(target) => openInspector(unit.id, target)}
                 onInspectorPointerLeave={() => scheduleInspectorClose(unit.id)}
                 onUnitClick={(source) => {
+                  // U5: на клетке юнита лежит спелл-план — обычный клик отменяет
+                  // его, как на пустой клетке (тот же handleCellClick-путь).
+                  if (
+                    !busy && !isAnimating && !isFinished &&
+                    plannedAt(unit.row, unit.col)
+                  ) {
+                    handleCellClick(unit.row, unit.col);
+                    return;
+                  }
                   // При уже выбранном заклинании клик по юниту остаётся выбором
                   // цели; во всех остальных случаях открывается detail (W1d).
                   if (selected && catalog.get(selected)?.card_type === "spell") {
@@ -748,6 +757,26 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 waitReason={waitReasonByUnit.get(unit.id)}
               />
             ))}
+            {planned
+              .filter((plan): plan is PlannedSpell => plan.kind === "spell")
+              .map((plan) => (
+                // U5/W6: спелл-план лежит на занятой клетке, поэтому маркер
+                // рисуется поверх юнита в overlay-слое. pointer-events: none —
+                // клик проходит к юниту, а тот отменяет план (см. onUnitClick).
+                <span
+                  key={`plan-spell-${plan.row}-${plan.col}`}
+                  aria-hidden="true"
+                  className="planned-target"
+                  style={
+                    {
+                      ["--col" as string]: plan.col,
+                      ["--row" as string]: plan.row,
+                    } as React.CSSProperties
+                  }
+                >
+                  <span className="planned-badge spell">План</span>
+                </span>
+              ))}
             {popups.map((popup) => (
               <DamagePopupView key={popup.key} popup={popup} />
             ))}
@@ -862,6 +891,65 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
             );
           })}
         </div>
+
+        {selected || planned.length > 0 ? (
+          // U5 (§24.1): компактная сводка — что выбрано, что запланировано,
+          // стоимость и остаток маны; отмена одного действия и всего плана.
+          <section aria-label="План на ход" className="plan-summary">
+            {selected ? (
+              <p className="plan-summary-selected">
+                Выбрано: <b>{catalog.get(selected)?.name ?? selected}</b> — кликни
+                подсвеченную клетку
+              </p>
+            ) : null}
+            {planned.length > 0 ? (
+              <>
+                <header className="plan-summary-head">
+                  <strong>План: {planned.length}</strong>
+                  <span>
+                    стоимость {plannedCost} · останется {availableMana}
+                  </span>
+                </header>
+                <ul className="plan-summary-list">
+                  {planned.map((plan, index) => {
+                    const card = catalog.get(plan.card_id);
+                    return (
+                      <li key={`${plan.card_id}-${plan.row}-${plan.col}-${index}`}>
+                        <span aria-hidden="true" className={`plan-summary-kind ${plan.kind}`}>
+                          {plan.kind === "spell" ? "✨" : "⚔"}
+                        </span>
+                        <span className="plan-summary-name">
+                          {card?.name ?? plan.card_id}
+                        </span>
+                        <span className="plan-summary-cost">{card?.cost ?? "?"}</span>
+                        <button
+                          aria-label={`Отменить: ${card?.name ?? plan.card_id}`}
+                          className="plan-summary-remove"
+                          disabled={busy || isAnimating || isFinished}
+                          onClick={() =>
+                            setPlanned((cur) => cur.filter((_, i) => i !== index))
+                          }
+                        >
+                          ×
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button
+                  className="ghost-btn plan-summary-clear"
+                  disabled={busy || isAnimating || isFinished}
+                  onClick={() => {
+                    setPlanned([]);
+                    setSelected(null);
+                  }}
+                >
+                  Очистить план
+                </button>
+              </>
+            ) : null}
+          </section>
+        ) : null}
 
         <button
           className="resolve-btn"
@@ -1100,6 +1188,31 @@ function UnitToken({
         </span>
         {waitReason ? <span className="unit-wait-badge">{unitWaitLabel(waitReason)}</span> : null}
       </span>
+    </span>
+  );
+}
+
+function PlannedPreview({ card }: { card?: CombatCatalogCard }) {
+  // U5/W6: превью строится из данных каталога, а не из живого юнита — у него
+  // нет unit id, оно не попадает в visibleUnits и в анимационный дедуп.
+  return (
+    <span className="planned-preview">
+      <span className="planned-preview-art">
+        <CardArt cardId={card?.id ?? ""} label={card?.name ?? "?"} rarity="common" />
+      </span>
+      {card?.stats ? (
+        <span className="planned-preview-stats">
+          <span title="Здоровье">
+            <HeartIcon />
+            {card.stats.hp}
+          </span>
+          <span title="Урон">
+            <BurstIcon />
+            {card.stats.damage}
+          </span>
+        </span>
+      ) : null}
+      <span className="planned-badge">План</span>
     </span>
   );
 }
