@@ -817,8 +817,9 @@ nav {
 }
 
 .battle-hud {
+  /* U3: третья колонка — стопка колоды. */
   display: grid;
-  grid-template-columns: 82px 1fr;
+  grid-template-columns: 82px 1fr auto;
   gap: 10px;
   align-items: stretch;
 }
@@ -953,8 +954,10 @@ nav {
   }
 }
 
-/* Face-down deck: stacked card back with a "cards left" counter. */
+/* Face-down deck: stacked card back with a "cards left" counter.
+   U3: живёт в battle-hud v4; box-shadow рисует «карты друг на друге». */
 .deck-stack {
+  position: relative;
   display: grid;
   gap: 2px;
   place-content: center;
@@ -967,6 +970,34 @@ nav {
   box-shadow:
     3px 3px 0 #24503f,
     6px 6px 0 #1b4032;
+}
+
+.battle-hud .deck-stack {
+  width: 52px;
+  margin-right: 6px; /* место под псевдослои стопки справа */
+}
+
+/* U3: рубашка летит от стопки вниз-влево к руке на card_drawn. */
+.deck-draw-fly {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 1px solid #244d3f;
+  border-radius: 10px;
+  background: #2d5f4d;
+  animation: deck-draw-fly var(--deck-draw-ms, 620ms) cubic-bezier(0.2, 0.85, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes deck-draw-fly {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-150%, 130%) rotate(-9deg) scale(0.92);
+  }
 }
 
 .deck-stack strong {

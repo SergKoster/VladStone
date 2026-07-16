@@ -4,6 +4,7 @@ import { type CombatEvent, type CombatMatch } from "../../api";
 import {
   AREA_PULSE_MS,
   DEATH_FADE_MS,
+  DECK_DRAW_MS,
   INTER_ITERATION_PAUSE,
   INTRA_ITERATION_PAUSE,
   LUNGE_IMPACT_MS,
@@ -37,6 +38,10 @@ export function useTurnPlayback() {
   const [waitedUnits, setWaitedUnits] = React.useState<
     Array<{ unitId: string; reason: NonNullable<CombatEvent["wait_reason"]> }>
   >([]);
+  // U3: транзиентные «полёты рубашки» на card_drawn (по игроку-получателю).
+  const [deckDraws, setDeckDraws] = React.useState<
+    Array<{ key: number; playerId: string }>
+  >([]);
   const isPlayingRef = React.useRef(false);
   const activePlaybackKeyRef = React.useRef<string | null>(null);
   const playedPlaybackKeysRef = React.useRef(new Set<string>());
@@ -65,6 +70,7 @@ export function useTurnPlayback() {
     setDyingIds([]);
     setSpawningIds([]);
     setWaitedUnits([]);
+    setDeckDraws([]);
   }, [clearEffectTimers]);
 
   const scheduleEffect = React.useCallback((callback: () => void, ms: number) => {
@@ -172,6 +178,18 @@ export function useTurnPlayback() {
             scheduleEffect(
               () => setPopups((existing) => existing.filter((item) => item.key !== popup.key)),
               POPUP_TTL_MS,
+            );
+          }
+
+          if (event.type === "card_drawn" && event.actor_id) {
+            const draw = { key: ++effectKeyRef.current, playerId: event.actor_id };
+            setDeckDraws((existing) => [...existing, draw]);
+            scheduleEffect(
+              () =>
+                setDeckDraws((existing) =>
+                  existing.filter((item) => item.key !== draw.key),
+                ),
+              DECK_DRAW_MS,
             );
           }
 
@@ -300,6 +318,7 @@ export function useTurnPlayback() {
     activeEvent,
     animatedMatch,
     cellPulses,
+    deckDraws,
     dyingIds,
     isAnimating,
     lunges,

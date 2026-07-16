@@ -151,6 +151,10 @@ export type CombatEvent = {
 export type CombatSnapshotPlayer = {
   id: string;
   mana: number;
+  /** U3: публичные счётчики для покадровой стопки колоды. Optional — снапшоты
+      ходов, сохранённые до этого поля, докатываются из состояния матча. */
+  deck_count?: number;
+  hand_count?: number;
 };
 
 /** Облегчённый юнит снапшота A1; остальные поля берутся из состояния матча. */

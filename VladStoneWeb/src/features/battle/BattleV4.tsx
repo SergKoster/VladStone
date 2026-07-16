@@ -19,6 +19,7 @@ import { CardDetail } from "../collection/CardDetail";
 import {
   AREA_PULSE_MS,
   DEATH_FADE_MS,
+  DECK_DRAW_MS,
   LUNGE_MS,
   MOVE_MS,
   PHASE_OVERLAY_FADE_MS,
@@ -87,6 +88,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     activeEvent,
     animatedMatch,
     cellPulses,
+    deckDraws,
     dyingIds,
     isAnimating,
     lunges,
@@ -831,8 +833,14 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           </div>
           <div className="turn-plate">
             <strong>Ход {visibleMatch.turn}</strong>
-            <span>Колода: {viewer?.deck_count ?? 0}</span>
+            <span>Рука: {viewer?.hand_count ?? 0}</span>
           </div>
+          {/* U3: стопка колоды вместо текста; счётчик убывает по кадрам
+              реплея (deck_count в event snapshot), рубашка летит на доборе. */}
+          <DeckStack
+            count={viewer?.deck_count ?? 0}
+            drawing={deckDraws.some((draw) => draw.playerId === viewer?.id)}
+          />
         </div>
 
         <div className="hand-v4">
@@ -1191,6 +1199,22 @@ function UnitToken({
         {waitReason ? <span className="unit-wait-badge">{unitWaitLabel(waitReason)}</span> : null}
       </span>
     </span>
+  );
+}
+
+function DeckStack({ count, drawing }: { count: number; drawing: boolean }) {
+  // U3: только публичный deck_count — состав и порядок колоды сюда не приходят.
+  return (
+    <div
+      aria-label={`Колода: осталось карт — ${count}`}
+      className={`deck-stack${count === 0 ? " empty" : ""}`}
+      role="img"
+      style={{ ["--deck-draw-ms" as string]: `${DECK_DRAW_MS}ms` } as React.CSSProperties}
+    >
+      {drawing ? <span aria-hidden="true" className="deck-draw-fly" /> : null}
+      <strong>{count}</strong>
+      <span>колода</span>
+    </div>
   );
 }
 

@@ -142,6 +142,25 @@ def test_towers_do_not_emit_unit_waited() -> None:
     assert waited_ids.isdisjoint(tower_ids)
 
 
+def test_event_snapshot_carries_counts_but_never_cards() -> None:
+    """U3: стопка колоды убывает по кадрам, но состав руки/колоды не течёт."""
+    state = make_battle()
+    human = human_of(state)
+    events = resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human.id))
+    draws = [e for e in events if e.kind == "card_drawn" and e.player_id == human.id]
+    assert draws, "человек с рукой 3 из 12 обязан добрать карту"
+    snapshot_player = next(
+        p for p in draws[-1].snapshot["players"] if p["id"] == human.id
+    )
+    # Кадр card_drawn снят ПОСЛЕ мутации — счётчики уже финальные для хода.
+    assert snapshot_player["deck_count"] == len(human.deck)
+    assert snapshot_player["hand_count"] == len(human.hand)
+    # Ни одно событие хода не раскрывает состав руки или порядок колоды.
+    for event in events:
+        for player_snapshot in event.snapshot["players"]:
+            assert set(player_snapshot) == {"id", "mana", "deck_count", "hand_count"}
+
+
 def test_payload_hides_deck_and_opponent_hand() -> None:
     state = make_battle()
     human = human_of(state)

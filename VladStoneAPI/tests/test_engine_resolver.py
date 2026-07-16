@@ -185,7 +185,12 @@ def test_board_snapshot_contract_and_unit_order_are_deterministic() -> None:
     }
     assert snapshot["units"][1]["card_id"] is None
     assert snapshot["units"][1]["is_tower"] is True
-    assert snapshot["players"] == [{"id": "p1", "mana": 10}, {"id": "p2", "mana": 10}]
+    # U3: снапшот несёт публичные счётчики руки/колоды (для стопки по кадрам),
+    # но НЕ состав руки и не порядок колоды.
+    assert snapshot["players"] == [
+        {"id": "p1", "mana": 10, "deck_count": 1, "hand_count": 0},
+        {"id": "p2", "mana": 10, "deck_count": 1, "hand_count": 0},
+    ]
 
 
 def test_event_snapshots_capture_new_move_cell_and_exclude_dead_units() -> None:

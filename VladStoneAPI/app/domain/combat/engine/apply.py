@@ -186,7 +186,18 @@ def board_snapshot(ctx: EffectContext) -> dict:
         )
     return {
         "units": units,
-        "players": [{"id": player.id, "mana": player.mana} for player in ctx.players],
+        # U3: публичные счётчики руки/колоды нужны покадрово (стопка колоды
+        # убывает на кадре card_drawn). Состав руки и порядок колоды в снапшот
+        # не попадают никогда — только числа, которые и так есть в payload.
+        "players": [
+            {
+                "id": player.id,
+                "mana": player.mana,
+                "deck_count": len(player.deck),
+                "hand_count": len(player.hand),
+            }
+            for player in ctx.players
+        ],
     }
 
 

@@ -32,7 +32,7 @@ export function applySnapshot(
   snapshot: CombatEventSnapshot,
   fallbackUnits: CombatUnit[] = [],
 ): CombatMatch {
-  const manaByPlayer = new Map(snapshot.players.map((player) => [player.id, player.mana]));
+  const snapshotPlayers = new Map(snapshot.players.map((player) => [player.id, player]));
   const currentUnits = new Map(match.units.map((unit) => [unit.id, unit]));
   const fallbackById = new Map(fallbackUnits.map((unit) => [unit.id, unit]));
   const snapshotIds = new Set(snapshot.units.map((unit) => unit.id));
@@ -51,10 +51,17 @@ export function applySnapshot(
 
   return {
     ...match,
-    players: match.players.map((player) => ({
-      ...player,
-      mana: manaByPlayer.get(player.id) ?? player.mana,
-    })),
+    players: match.players.map((player) => {
+      const snap = snapshotPlayers.get(player.id);
+      return {
+        ...player,
+        mana: snap?.mana ?? player.mana,
+        // U3: счётчики руки/колоды идут по кадрам (стопка убывает на доборе);
+        // старые снапшоты без этих полей оставляют значения из состояния.
+        deck_count: snap?.deck_count ?? player.deck_count,
+        hand_count: snap?.hand_count ?? player.hand_count,
+      };
+    }),
     units: [...unitsFromSnapshot, ...retainedUnits].sort(compareUnitIds),
   };
 }
