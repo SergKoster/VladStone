@@ -5,6 +5,8 @@ from app.domain.combat.constants import (
     MAX_RESOLVE_BUFFER_SECONDS,
     RESOLVE_STEP_SECONDS,
     TURN_DURATION_SECONDS,
+    TURN_TIMER_FLOOR_SECONDS,
+    TURN_TIMER_SHRINK_START_TURN,
 )
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
 
@@ -12,6 +14,17 @@ from app.domain.combat.models import MatchLifecycleStatus, MatchState
 def resolution_buffer_seconds(num_events: int) -> int:
     """Time to reserve for the client to animate `num_events` micro-steps."""
     return min(MAX_RESOLVE_BUFFER_SECONDS, ceil(max(0, num_events) * RESOLVE_STEP_SECONDS))
+
+
+def turn_duration_seconds(turn: int) -> int:
+    """Время планирования хода с эндшпильным сжатием (DESIGN §3.5).
+
+    До TURN_TIMER_SHRINK_START_TURN — базовые TURN_DURATION_SECONDS; начиная с
+    него каждый ход −1 с, пол — TURN_TIMER_FLOOR_SECONDS. Сервер отдаёт это
+    число клиенту в payload (`planning_seconds`) — фронт формулу не дублирует.
+    """
+    over_shrink_start = max(0, turn - (TURN_TIMER_SHRINK_START_TURN - 1))
+    return max(TURN_TIMER_FLOOR_SECONDS, TURN_DURATION_SECONDS - over_shrink_start)
 
 
 def start_planning_timer(

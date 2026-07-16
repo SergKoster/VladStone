@@ -182,6 +182,9 @@ export type CombatMatch = {
   cols: number;
   mana_cap: number;
   planning_deadline: string | null;
+  /** Время планирования текущего хода, сек (эндшпиль сжимает — DESIGN §3.5).
+      Серверное число: клиент капает им видимый таймер, формулу не дублирует. */
+  planning_seconds: number;
   players: Array<{
     id: string;
     side: "top" | "bottom";

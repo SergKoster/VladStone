@@ -44,12 +44,13 @@ from app.domain.combat.engine.statuses import (
     status_spec,
     tick_statuses,
 )
-from app.domain.combat.engine.tags import TAG_TOWER
+from app.domain.combat.engine.tags import TAG_STRUCTURE, TAG_TOWER
 from app.domain.combat.engine.units import (
     UnitState,
     current_stance,
     effective_stats,
     spawn_unit,
+    unit_tags,
 )
 from app.domain.combat.engine.validation import validate_state
 from app.domain.combat.models import PlayerSide, PlayerState, UnitWaitReason
@@ -383,6 +384,10 @@ def _unit_wait_events(ctx: EffectContext, acted_unit_ids: set[str]) -> list[Engi
         if unit.id in acted_unit_ids:
             continue
         blueprint = ctx.blueprint_of(unit)
+        # Структуры (башни) не ходят по определению — их «ожидание» не факт
+        # для игрока, а шум: раздувает ленту и анимационный буфер дедлайна.
+        if TAG_STRUCTURE in unit_tags(unit, blueprint):
+            continue
         events.append(
             _event(
                 ctx,

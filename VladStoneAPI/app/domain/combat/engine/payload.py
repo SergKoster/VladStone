@@ -15,6 +15,7 @@ from app.domain.combat.engine.tags import TAG_TOWER
 from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import current_stance, effective_stats, unit_tags
 from app.domain.combat.helpers import human_players
+from app.domain.combat.timing import turn_duration_seconds
 
 
 def _unit_payload(unit, blueprint) -> dict:
@@ -143,6 +144,10 @@ def v4_combat_response(
         "planning_deadline": (
             state.planning_deadline.isoformat() if state.planning_deadline else None
         ),
+        # Длительность планирования ТЕКУЩЕГО хода (эндшпиль сжимает, DESIGN
+        # §3.5). Клиент капает видимый таймер этим числом и не дублирует
+        # формулу; буфер анимации в дедлайне остаётся сверху.
+        "planning_seconds": turn_duration_seconds(state.turn),
         "players": players_payload,
         "viewer_id": viewer_id,
         "units": [_unit_payload(unit, ctx.blueprint_of(unit)) for unit in state.units],

@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 from app.domain.combat.constants import (
     MANA_CAP,
     RULESET_VERSION,
-    TURN_DURATION_SECONDS,
 )
 from app.domain.combat.engine.apply import EffectContext, EngineEvent
 from app.domain.combat.engine.bot import plan_bot_intents
@@ -43,7 +42,7 @@ from app.domain.combat.models import (
     MatchResult,
     PlayerState,
 )
-from app.domain.combat.timing import resolution_buffer_seconds
+from app.domain.combat.timing import resolution_buffer_seconds, turn_duration_seconds
 
 HAND_START_SIZE = 3
 # Ход, на котором наступает «суд» (§17, решение владельца — O10-ручка).
@@ -127,7 +126,7 @@ def create_v4_battle(
     for player in state.players:
         add_towers(ctx, player)
     apply_context(state, ctx)
-    state.planning_deadline = started_at + timedelta(seconds=TURN_DURATION_SECONDS)
+    state.planning_deadline = started_at + timedelta(seconds=turn_duration_seconds(1))
     return state
 
 
@@ -193,7 +192,11 @@ def _advance_turn_and_check_end(
     state.turn += 1
     state.status = MatchLifecycleStatus.PLANNING
     buffer = resolution_buffer_seconds(num_events)
-    state.planning_deadline = now + timedelta(seconds=buffer + TURN_DURATION_SECONDS)
+    # Эндшпильное сжатие таймера (DESIGN §3.5): длительность зависит от номера
+    # хода; буфер анимации прибавляется сверху, как раньше.
+    state.planning_deadline = now + timedelta(
+        seconds=buffer + turn_duration_seconds(state.turn)
+    )
 
 
 def _finish(state: BattleStateV4, winner_team: int | None) -> None:

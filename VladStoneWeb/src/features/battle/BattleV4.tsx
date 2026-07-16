@@ -308,24 +308,27 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   }, [match?.id]);
 
   // --- turn countdown from the server planning deadline ---
+  // Длительность хода — серверная (эндшпиль сжимает её с 15-го хода,
+  // DESIGN §3.5); TURN_SECONDS — только запасное значение до первого payload.
+  const planningSeconds = match?.planning_seconds ?? TURN_SECONDS;
   React.useEffect(() => {
     if (isAnimating) {
       // Дедлайн следующего хода уже включает серверный animation buffer, но
       // игроку во время резолва показываем именно паузу, а не убывающие секунды.
-      setSecondsLeft(TURN_SECONDS);
+      setSecondsLeft(planningSeconds);
       return undefined;
     }
     if (!match?.planning_deadline || match.status !== "planning") {
-      setSecondsLeft(TURN_SECONDS);
+      setSecondsLeft(planningSeconds);
       return undefined;
     }
     // Серверный deadline включает оценочный animation buffer. Если реальное
     // проигрывание короче резерва, сырой deadline ещё несколько секунд был бы
-    // больше 30 и визуальный таймер «застывал» бы на 30 после анимации.
-    // Локальная шкала стартует сейчас, но никогда не продлевает серверный срок.
+    // больше длительности хода и визуальный таймер «застывал» бы после
+    // анимации. Локальная шкала стартует сейчас, но не продлевает серверный срок.
     const displayDeadline = Math.min(
       Date.parse(match.planning_deadline),
-      Date.now() + TURN_SECONDS * 1000,
+      Date.now() + planningSeconds * 1000,
     );
     const tick = () => {
       const left = Math.max(
@@ -337,7 +340,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [isAnimating, match?.planning_deadline, match?.status]);
+  }, [isAnimating, match?.planning_deadline, match?.status, planningSeconds]);
 
   React.useEffect(() => {
     if (
