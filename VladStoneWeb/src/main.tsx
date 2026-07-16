@@ -180,7 +180,9 @@ function App() {
           Выйти
         </button>
       </aside>
-      <section className="content">
+      {/* U2: у маршрута боя свой layout-модификатор — широкий экран отдан бою,
+          остальные страницы сохраняют прежнюю ширину (.page). */}
+      <section className={route === "battle" ? "content content-battle" : "content"}>
         {route === "dashboard" && (
           <Dashboard
             coins={profile?.coins ?? 0}

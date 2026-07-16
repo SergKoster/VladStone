@@ -143,6 +143,12 @@ nav {
   min-width: 0;
 }
 
+/* U2: маршрут боя — свой layout-модификатор (main.tsx): чуть меньше отступы,
+   остальные страницы (.page, max-width 1120px) не трогаем. */
+.content-battle {
+  padding: 20px 24px;
+}
+
 .page {
   display: grid;
   gap: 22px;
@@ -376,6 +382,12 @@ nav {
   align-content: center;
   min-width: 0;
   min-height: 0;
+  /* U2 (§23.4): поле ограничено И шириной колонки, И высотой вьюпорта —
+     на широком низком мониторе башни/ману не выталкивает за экран. Геометрия
+     от серверных --cols/--rows (заданы инлайном на stage), 5×5 не хардкодим;
+     ~290px — башни, оверлей, мана и отступы вокруг поля. */
+  width: min(100%, calc((100dvh - 290px) * var(--cols, 5) / var(--rows, 5)), 780px);
+  margin-inline: auto;
 }
 
 /* Thin battle header — keeps the start / new-battle action out of the way. */
@@ -1545,13 +1557,16 @@ nav {
 }
 
 /* --- Боёвка v4: поле из данных (rows/cols), башни, юниты, рука --- */
+/* U2 (§23.4): бой использует широкий экран — до 1440px с центрированием;
+   правая колонка растёт под руку/лог, а не схлопывается в фикс-340px. */
 .battle-v4 {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(240px, 340px);
-  gap: 18px;
+  grid-template-columns: minmax(320px, 1.9fr) minmax(340px, 1fr);
+  gap: 22px;
   align-items: start;
-  max-width: 1100px;
+  width: min(100%, 1440px);
+  margin-inline: auto;
   min-height: calc(100dvh - 56px);
 }
 
@@ -2419,8 +2434,27 @@ nav {
   overflow-y: auto;
 }
 
+/* U2 (§23.4 п.4): на высоком десктопе логу отдаётся свободная правая область. */
+@media (min-width: 1200px) and (min-height: 800px) {
+  .battle-v4 .battle-log {
+    max-height: min(320px, 32dvh);
+  }
+}
+
+/* U2: средний breakpoint — боковая колонка ужимается, но не мобильная. */
+@media (max-width: 1050px) {
+  .battle-v4 {
+    grid-template-columns: minmax(300px, 1.6fr) minmax(260px, 1fr);
+    gap: 14px;
+  }
+}
+
 @media (max-width: 720px) {
   .battle-v4 {
     grid-template-columns: 1fr;
+  }
+  .battle-stage {
+    /* На одной колонке высотный резерв меньше: рука/лог уходят вниз. */
+    width: min(100%, calc((100dvh - 250px) * var(--cols, 5) / var(--rows, 5)));
   }
 }

@@ -641,7 +641,9 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           {dragGhost.name}
         </div>
       ) : null}
-      <section className="battle-stage">
+      {/* U2: --cols/--rows и тайминги заданы на stage — от них считаются и кап
+          поля по высоте вьюпорта, и геометрия слоёв (наследование CSS-переменных). */}
+      <section className="battle-stage" style={boardStyle}>
         <div className="battle-topbar">
           <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
             Новый бой
@@ -671,7 +673,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           <PhaseOverlay label={currentPhaseLabel} />
         </div>
 
-        <div className="board-v4-wrap" style={boardStyle}>
+        <div className="board-v4-wrap">
           <div className="board-v4">
             {Array.from({ length: rows * cols }, (_, i) => {
               const row = Math.floor(i / cols);
