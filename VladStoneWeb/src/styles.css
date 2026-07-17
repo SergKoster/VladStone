@@ -2447,6 +2447,27 @@ nav {
   cursor: grabbing;
 }
 
+/* V1: добранная карта влетает лицом в СВОЙ слот руки со стороны стопки
+   (стопка — в HUD над рукой, справа). Анимируется сам элемент карты, поэтому
+   «своё место» гарантировано раскладкой, а не измерением координат. */
+.hand-card-v4.drawn {
+  animation: card-draw-v4 var(--deck-draw-ms, 620ms) cubic-bezier(0.2, 0.85, 0.3, 1);
+}
+
+@keyframes card-draw-v4 {
+  0% {
+    opacity: 0;
+    transform: translate(45%, -115%) rotate(6deg) scale(0.82);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Призрак карты под курсором во время перетаскивания (не мешает hit-test'у). */
 .card-drag-ghost {
   position: fixed;

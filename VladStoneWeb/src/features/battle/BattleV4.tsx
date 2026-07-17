@@ -135,7 +135,39 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const detailSourceRef = React.useRef<HTMLElement | null>(null);
   const [detail, setDetail] = React.useState<CombatDetail | null>(null);
 
+  // V1: добранная карта определяется diff-ом СВОЕЙ руки до/после хода —
+  // сервер её в событиях не раскрывает (анти-чит), но владелец видит свою
+  // руку в payload. Помеченная карта влетает в свой слот со стороны стопки.
+  const [justDrawn, setJustDrawn] = React.useState<{ cardId: string } | null>(null);
+  const justDrawnTimerRef = React.useRef<number | null>(null);
+
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
+    const prev = matchRef.current;
+    if (prev && nextMatch.id === prev.id && nextMatch.turn > prev.turn) {
+      const viewerId = nextMatch.viewer_id;
+      const before = prev.players.find((p) => p.id === viewerId)?.hand ?? [];
+      const after = nextMatch.players.find((p) => p.id === viewerId)?.hand ?? [];
+      const counts = new Map<string, number>();
+      before.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));
+      const gained = after.filter((id) => {
+        const left = counts.get(id) ?? 0;
+        if (left > 0) {
+          counts.set(id, left - 1);
+          return false;
+        }
+        return true;
+      });
+      if (gained.length === 1) {
+        if (justDrawnTimerRef.current !== null) {
+          window.clearTimeout(justDrawnTimerRef.current);
+        }
+        setJustDrawn({ cardId: gained[0] });
+        justDrawnTimerRef.current = window.setTimeout(
+          () => setJustDrawn(null),
+          DECK_DRAW_MS + 200,
+        );
+      }
+    }
     matchRef.current = nextMatch;
     setMatch(nextMatch);
   }, []);
@@ -901,10 +933,19 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           />
         </div>
 
-        <div className="hand-v4">
-          {handEntries.map(({ key, cardId, isPlanned }) => {
+        <div
+          className="hand-v4"
+          style={{ ["--deck-draw-ms" as string]: `${DECK_DRAW_MS}ms` } as React.CSSProperties}
+        >
+          {handEntries.map(({ key, cardId, isPlanned }, index) => {
             const card = catalog.get(cardId);
             const affordable = (card?.cost ?? 0) + plannedCost <= (viewer?.mana ?? 0);
+            // V1: добор кладёт карту в конец руки — влёт получает последний
+            // экземпляр добранного id, ровно в его настоящем слоте.
+            const isDrawnCard =
+              justDrawn !== null &&
+              cardId === justDrawn.cardId &&
+              index === (viewer?.hand ?? []).lastIndexOf(justDrawn.cardId);
             return (
               <button
                 key={key}
@@ -913,6 +954,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                   selected === cardId ? "active" : "",
                   isPlanned ? "planned" : "",
                   !affordable && !isPlanned ? "poor" : "",
+                  isDrawnCard ? "drawn" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
