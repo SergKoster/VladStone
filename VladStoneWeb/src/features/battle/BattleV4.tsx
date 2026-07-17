@@ -25,6 +25,7 @@ import {
   PHASE_OVERLAY_FADE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
+  SPELL_CAST_MS,
   UNIT_WAITED_MS,
 } from "./animationConfig";
 import {
@@ -96,6 +97,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     playTurn,
     popups,
     spawningIds,
+    spellCasts,
     waitedUnits,
   } = useTurnPlayback();
   // Синхронный флаг для WS-обработчика: React-state обновляется не сразу, а
@@ -609,6 +611,12 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const visibleMatch = renderedMatch ?? match;
   const currentPhaseLabel = phaseLabel(phaseEvent);
   const lungeByUnit = new Map(lunges.map((lunge) => [lunge.unitId, lunge]));
+  // V7: подсветка `.ok` на клетках прячется под токенами — юниты-цели
+  // выбранного заклинания подсвечиваются на самих токенах.
+  const selectedSpell = (() => {
+    const card = selected ? catalog.get(selected) : null;
+    return card?.card_type === "spell" ? card : null;
+  })();
   const waitReasonByUnit = new Map(waitedUnits.map((waited) => [waited.unitId, waited.reason]));
   const visibleUnits = visibleMatch.units
     .filter((unit) => !unit.is_tower)
@@ -764,6 +772,9 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                   }
                 }}
                 showRemainingActions={isAnimating}
+                spellTargetable={Boolean(
+                  selectedSpell && isValidTarget(selectedSpell, unit.row, unit.col),
+                )}
                 targeted={activeEvent?.target_id === unit.id}
                 unit={unit}
                 waitReason={waitReasonByUnit.get(unit.id)}
@@ -786,9 +797,40 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                     } as React.CSSProperties
                   }
                 >
+                  {/* V7: мини-арт заклинания в углу токена цели. */}
+                  <span className="planned-target-art">
+                    <CardArt
+                      cardId={plan.card_id}
+                      label={catalog.get(plan.card_id)?.name ?? plan.card_id}
+                      rarity="common"
+                    />
+                  </span>
                   <span className="planned-badge spell">План</span>
                 </span>
               ))}
+            {spellCasts.map((cast) => (
+              // V7: применённое заклинание всплывает артом над клеткой цели.
+              <span
+                key={cast.key}
+                aria-hidden="true"
+                className="spell-cast-float"
+                style={
+                  {
+                    ["--col" as string]: cast.col,
+                    ["--row" as string]: cast.row,
+                    ["--spell-cast-ms" as string]: `${SPELL_CAST_MS}ms`,
+                  } as React.CSSProperties
+                }
+              >
+                <span className="spell-cast-float-art">
+                  <CardArt
+                    cardId={cast.cardId}
+                    label={catalog.get(cast.cardId)?.name ?? cast.cardId}
+                    rarity="common"
+                  />
+                </span>
+              </span>
+            ))}
             {popups.map((popup) => (
               <DamagePopupView
                 key={popup.key}
@@ -1102,6 +1144,7 @@ function UnitToken({
   onUnitClick,
   showRemainingActions,
   spawning,
+  spellTargetable,
   targeted,
   waitReason,
 }: {
@@ -1119,6 +1162,7 @@ function UnitToken({
   onUnitClick: (source: HTMLElement) => void;
   showRemainingActions: boolean;
   spawning: boolean;
+  spellTargetable: boolean;
   targeted: boolean;
   waitReason?: NonNullable<CombatEvent["wait_reason"]>;
 }) {
@@ -1174,6 +1218,7 @@ function UnitToken({
             targeted ? "targeted" : "",
             waitReason ? "waiting" : "",
             inspected ? "inspected" : "",
+            spellTargetable ? "spell-target" : "",
           ]
             .filter(Boolean)
             .join(" ")}

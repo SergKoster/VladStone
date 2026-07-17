@@ -12,6 +12,7 @@ import {
   MOVE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
+  SPELL_CAST_MS,
   UNIT_WAITED_MS,
   WATCHDOG_MS,
 } from "./animationConfig";
@@ -42,6 +43,10 @@ export function useTurnPlayback() {
   const [deckDraws, setDeckDraws] = React.useState<
     Array<{ key: number; playerId: string }>
   >([]);
+  // V7: всплытия арта заклинания над клеткой-целью на spell_cast.
+  const [spellCasts, setSpellCasts] = React.useState<
+    Array<{ key: number; row: number; col: number; cardId: string }>
+  >([]);
   const isPlayingRef = React.useRef(false);
   const activePlaybackKeyRef = React.useRef<string | null>(null);
   const playedPlaybackKeysRef = React.useRef(new Set<string>());
@@ -71,6 +76,7 @@ export function useTurnPlayback() {
     setSpawningIds([]);
     setWaitedUnits([]);
     setDeckDraws([]);
+    setSpellCasts([]);
   }, [clearEffectTimers]);
 
   const scheduleEffect = React.useCallback((callback: () => void, ms: number) => {
@@ -178,6 +184,23 @@ export function useTurnPlayback() {
             scheduleEffect(
               () => setPopups((existing) => existing.filter((item) => item.key !== popup.key)),
               POPUP_TTL_MS,
+            );
+          }
+
+          if (event.type === "spell_cast" && event.card_id && event.to_position) {
+            const cast = {
+              key: ++effectKeyRef.current,
+              row: event.to_position.row,
+              col: event.to_position.col,
+              cardId: event.card_id,
+            };
+            setSpellCasts((existing) => [...existing, cast]);
+            scheduleEffect(
+              () =>
+                setSpellCasts((existing) =>
+                  existing.filter((item) => item.key !== cast.key),
+                ),
+              SPELL_CAST_MS,
             );
           }
 
@@ -326,6 +349,7 @@ export function useTurnPlayback() {
     playTurn,
     popups,
     spawningIds,
+    spellCasts,
     waitedUnits,
   };
 }

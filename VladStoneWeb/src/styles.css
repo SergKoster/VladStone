@@ -1788,6 +1788,76 @@ nav {
   pointer-events: none;
 }
 
+/* V7: мини-арт запланированного заклинания в углу токена цели. */
+.planned-target-art {
+  position: absolute;
+  top: 4%;
+  right: 4%;
+  width: 38%;
+  aspect-ratio: 1;
+  border: 2px solid #8a4bc0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(52 22 78 / 0.4);
+}
+.planned-target-art .card-art {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+/* V7: применённое заклинание всплывает артом над клеткой цели и тает. */
+.spell-cast-float {
+  position: absolute;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  pointer-events: none;
+}
+.spell-cast-float-art {
+  width: 62%;
+  aspect-ratio: 1;
+  border: 2px solid #8a4bc0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 4px 14px rgb(52 22 78 / 0.45);
+  animation: spell-cast-rise var(--spell-cast-ms, 950ms) ease-out both;
+}
+.spell-cast-float-art .card-art {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+@keyframes spell-cast-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(28%) scale(0.7);
+  }
+  22% {
+    opacity: 1;
+    transform: translateY(0) scale(1.04);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-34%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-58%) scale(0.94);
+  }
+}
+
 /* U5 (§24.1): сводка плана рядом с кнопкой завершения хода. */
 .plan-summary {
   display: grid;
@@ -1893,6 +1963,18 @@ nav {
 }
 .unit-v4.top.inspected,
 .unit-layer-v4 .unit-token:focus-visible .unit-v4.top {
+  --unit-side-outline: #d0443c;
+}
+
+/* V7: юнит — валидная цель выбранного заклинания; фиолетовое кольцо поверх
+   цвета стороны (подсветка `.ok` на клетке прячется под токеном). */
+.unit-v4.spell-target {
+  box-shadow:
+    0 0 0 2px var(--unit-side-outline, #2d9d5f),
+    0 0 0 4px #8a4bc0,
+    0 0 12px rgb(138 75 192 / 0.6);
+}
+.unit-v4.top.spell-target {
   --unit-side-outline: #d0443c;
 }
 

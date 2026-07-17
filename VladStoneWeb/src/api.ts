@@ -145,6 +145,8 @@ export type CombatEvent = {
   /** V9: структурные данные статуса (status_applied/expired) для попапа. */
   status_id?: string | null;
   status_stacks?: number | null;
+  /** V7: карта видимого розыгрыша (spell_cast/spawn); у скрытых событий null. */
+  card_id?: string | null;
   /** Полная область визуального эффекта, включая пустые клетки поля. */
   affected_cells: Array<{ row: number; col: number }>;
   snapshot: CombatEventSnapshot;

@@ -121,6 +121,10 @@ def test_player_facts_and_sequence_numbering() -> None:
     assert [event.sequence for event in events] == [1, 2, 3]
     assert [event.actor_id for event in events] == ["p1", "p2", "p2"]
     assert events[0].type == CombatEventType.SPELL_CAST
+    # V7: видимый розыгрыш несёт карту структурно (арт всплытия каста);
+    # добор карту НЕ раскрывает (анти-чит).
+    assert events[0].card_id == "bolt_card"
+    assert events[1].card_id is None
     # micro_step вне итераций — 0 (как спавны в MVP-контракте).
     assert all(event.micro_step == 0 for event in events)
 

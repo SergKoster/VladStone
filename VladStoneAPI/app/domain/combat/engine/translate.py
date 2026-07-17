@@ -79,6 +79,11 @@ def translate_engine_events(
                     else None
                 ),
                 status_stacks=fact.amount if fact.kind == "status_applied" else None,
+                card_id=(
+                    fact.card_id
+                    if fact.kind in ("spell_cast", "spawned", "token_spawned")
+                    else None
+                ),
                 affected_cells=[Position(row=row, col=col) for row, col in fact.affected_cells],
                 snapshot=fact.snapshot,
             )

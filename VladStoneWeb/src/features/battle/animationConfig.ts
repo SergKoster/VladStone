@@ -14,3 +14,5 @@ export const WATCHDOG_MS = 8_000;
 export const UNIT_WAITED_MS = 760;
 // U3: полёт рубашки от стопки колоды к руке на card_drawn.
 export const DECK_DRAW_MS = 620;
+// V7: всплытие арта заклинания над целью на spell_cast.
+export const SPELL_CAST_MS = 950;

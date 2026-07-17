@@ -179,6 +179,10 @@ class CombatEvent(BaseModel):
     # «Яд +3» строится по ним, UI не разбирает message.
     status_id: str | None = None
     status_stacks: int | None = None
+    # V7: карта видимого розыгрыша (spell_cast/spawn) — арт всплытия каста и
+    # будущий лог розыгрышей (V8). Только публичные действия: card_drawn и
+    # прочие скрытые события карту НЕ несут (анти-чит).
+    card_id: str | None = None
     # Полная область визуального эффекта, включая пустые клетки поля.
     affected_cells: list[Position] = Field(default_factory=list)
     snapshot: dict = Field(default_factory=dict)
