@@ -2424,7 +2424,10 @@ nav {
 
 .hand-v4 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  /* V2: кэп руки 6 → фикс-сетка 3×2 вместо auto-fill. Никаких раскладок
+     «5+1»: 1–3 карты — один ряд, 4–6 — два аккуратных ряда по 3.
+     Полный редизайн карт руки — W7 (§23.8). */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
