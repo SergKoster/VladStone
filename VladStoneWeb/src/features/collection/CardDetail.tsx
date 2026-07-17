@@ -242,7 +242,9 @@ function CoveragePreview({
   cells: CoverageCell[];
   label: string;
 }) {
-  const unitRow = board.rows - 1;
+  // V4 (владелец, июль 2026): юнит рисуется в ЦЕНТРЕ схемы, а не в нижнем
+  // ряду — так видно и покрытие «назад» (кресты/кольца бьют за спину).
+  const unitRow = Math.floor(board.rows / 2);
   const unitCol = Math.floor(board.cols / 2);
   const covered = new Set(
     cells

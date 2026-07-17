@@ -73,6 +73,12 @@ def translate_engine_events(
                 ability_trigger=fact.trigger if fact.kind == "ability_triggered" else None,
                 effect_kind=fact.effect_kind if fact.kind == "ability_triggered" else None,
                 wait_reason=fact.wait_reason if fact.kind == "unit_waited" else None,
+                status_id=(
+                    fact.status_id
+                    if fact.kind in ("status_applied", "status_expired")
+                    else None
+                ),
+                status_stacks=fact.amount if fact.kind == "status_applied" else None,
                 affected_cells=[Position(row=row, col=col) for row, col in fact.affected_cells],
                 snapshot=fact.snapshot,
             )

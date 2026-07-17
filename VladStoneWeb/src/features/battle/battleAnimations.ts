@@ -11,7 +11,9 @@ export type BattlePopup = {
   row: number;
   col: number;
   amount: number;
-  kind: "damage" | "heal";
+  kind: "damage" | "heal" | "status";
+  /** V9: id статуса для подписи попапа («Яд +3»); имя берётся из каталога. */
+  statusId?: string;
 };
 
 export type CellPulse = {
@@ -55,6 +57,21 @@ export function popupForEvent(
   before: CombatMatch,
   key: number,
 ): BattlePopup | null {
+  // V9: наложение статуса всплывает над целью («Яд +3») по структурным полям.
+  if (event.type === "status_applied" && event.status_id) {
+    const target = event.target_id
+      ? before.units.find((unit) => unit.id === event.target_id)
+      : null;
+    if (!target) return null;
+    return {
+      key,
+      row: target.row,
+      col: target.col,
+      amount: event.status_stacks ?? 0,
+      kind: "status",
+      statusId: event.status_id,
+    };
+  }
   if (event.type !== "attack" && event.type !== "damage" && event.type !== "heal") {
     return null;
   }

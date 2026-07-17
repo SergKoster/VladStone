@@ -175,6 +175,10 @@ class CombatEvent(BaseModel):
     effect_kind: str | None = None
     # Структурная причина наблюдаемого unit_waited (U1).
     wait_reason: UnitWaitReason | None = None
+    # V9: структурные данные статуса (status_applied/status_expired) — попап
+    # «Яд +3» строится по ним, UI не разбирает message.
+    status_id: str | None = None
+    status_stacks: int | None = None
     # Полная область визуального эффекта, включая пустые клетки поля.
     affected_cells: list[Position] = Field(default_factory=list)
     snapshot: dict = Field(default_factory=dict)

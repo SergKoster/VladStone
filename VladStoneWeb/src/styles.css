@@ -1913,6 +1913,8 @@ nav {
   z-index: 4;
   left: 50%;
   bottom: calc(100% + 5px);
+  /* V10: бейдж всплывает и плавно затухает, а не появляется/исчезает резко. */
+  animation: wait-badge-float var(--unit-waited-ms, 760ms) ease both;
   width: max-content;
   max-width: min(170px, 46vw);
   padding: 3px 6px;
@@ -1933,6 +1935,26 @@ nav {
   0% { filter: brightness(1); }
   28% { filter: brightness(1.16) saturate(0.82); }
   100% { filter: brightness(0.94) saturate(0.88); }
+}
+
+/* translateX(-50%) — базовое центрирование бейджа, сохраняем во всех кадрах. */
+@keyframes wait-badge-float {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  16% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-2px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-7px);
+  }
 }
 
 @keyframes unit-targeted {
@@ -1962,6 +1984,16 @@ nav {
 .unit-layer-v4 .damage-popup.heal > .ico,
 .unit-layer-v4 .damage-popup.heal .damage-popup-text {
   color: #2d9d5f;
+}
+
+/* V9: попап наложенного статуса («Яд +3») — фиолетовый текст без иконки. */
+.unit-layer-v4 .damage-popup.status {
+  grid-template-columns: 1fr;
+}
+.unit-layer-v4 .damage-popup.status .damage-popup-text {
+  color: #7a3fb3;
+  font-size: clamp(0.72rem, 2.6vw, 1rem);
+  white-space: nowrap;
 }
 
 .cell-effect-pulse {

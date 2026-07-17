@@ -89,6 +89,10 @@ def test_unit_scoped_facts_put_the_unit_into_target_id() -> None:
     assert heal_event.damage is None  # рост HP — не урон, попапом урона не идёт
     assert status_event.type == CombatEventType.STATUS_APPLIED
     assert "poison" in status_event.message
+    # V9: попап «Яд +N» строится по структурным полям, а не по message.
+    assert status_event.status_id == "poison"
+    assert status_event.status_stacks == 2
+    assert heal_event.status_id is None and heal_event.status_stacks is None
 
 
 def test_waited_fact_keeps_the_server_reason() -> None:

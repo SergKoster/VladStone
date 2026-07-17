@@ -188,6 +188,14 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     }, INSPECTOR_CLOSE_DELAY_MS);
   }
 
+  // V5 (решение владельца): ховер-инспектор живёт только пока курсор на самом
+  // токене — уход с юнита закрывает панель СРАЗУ, без задержки и без «заезда»
+  // курсором внутрь панели. Задержка остаётся только у blur (клавиатура).
+  function closeInspectorNow(unitId: string) {
+    clearInspectorCloseTimer();
+    setInspected((current) => (current?.unitId === unitId ? null : current));
+  }
+
   function rememberInspectorPointer(pointerType: string) {
     lastInspectorPointerTypeRef.current = pointerType;
     window.setTimeout(() => {
@@ -736,7 +744,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 }}
                 onInspectorPointerDown={rememberInspectorPointer}
                 onInspectorPointerEnter={(target) => openInspector(unit.id, target)}
-                onInspectorPointerLeave={() => scheduleInspectorClose(unit.id)}
+                onInspectorPointerLeave={() => closeInspectorNow(unit.id)}
                 onUnitClick={(source) => {
                   // U5: на клетке юнита лежит спелл-план — обычный клик отменяет
                   // его, как на пустой клетке (тот же handleCellClick-путь).
@@ -782,14 +790,22 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 </span>
               ))}
             {popups.map((popup) => (
-              <DamagePopupView key={popup.key} popup={popup} />
+              <DamagePopupView
+                key={popup.key}
+                popup={popup}
+                statusLabel={
+                  popup.kind === "status"
+                    ? statusCatalog.get(popup.statusId ?? "")?.name ?? popup.statusId
+                    : undefined
+                }
+              />
             ))}
           </div>
           {inspected && inspectedUnit ? (
+            // V5: у панели нет pointer-обработчиков — она чисто read-only и
+            // исчезает вместе с уходом курсора с токена.
             <UnitInspector
               card={inspectedCard ?? undefined}
-              onPointerEnter={clearInspectorCloseTimer}
-              onPointerLeave={() => scheduleInspectorClose(inspectedUnit.id)}
               placement={inspected.placement}
               showRemainingActions={isAnimating}
               statusCatalog={statusCatalog}
@@ -1261,16 +1277,12 @@ function coverageCellsFor(
 
 function UnitInspector({
   card,
-  onPointerEnter,
-  onPointerLeave,
   placement,
   showRemainingActions,
   statusCatalog,
   unit,
 }: {
   card: CombatCatalogCard | undefined;
-  onPointerEnter: () => void;
-  onPointerLeave: () => void;
   placement: InspectorPlacement;
   showRemainingActions: boolean;
   statusCatalog: Map<string, CombatStatusDefinition>;
@@ -1299,8 +1311,6 @@ function UnitInspector({
     <aside
       className={`unit-inspector ${placement.side}`}
       id="unit-inspector"
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
       role="region"
       aria-label={`Инспектор: ${card?.name ?? "юнит"}`}
       style={placementStyle}
@@ -1365,17 +1375,30 @@ function unitWaitLabel(reason: NonNullable<CombatEvent["wait_reason"]>) {
   }
 }
 
-function DamagePopupView({ popup }: { popup: BattlePopup }) {
+function DamagePopupView({
+  popup,
+  statusLabel,
+}: {
+  popup: BattlePopup;
+  statusLabel?: string;
+}) {
+  const positionStyle = {
+    ["--col" as string]: popup.col,
+    ["--row" as string]: popup.row,
+  } as React.CSSProperties;
+  if (popup.kind === "status") {
+    // V9: наложение статуса всплывает над целью текстом («Яд +3»).
+    return (
+      <span className="damage-popup status" style={positionStyle}>
+        <span className="damage-popup-text">
+          {statusLabel}
+          {popup.amount > 0 ? ` +${popup.amount}` : ""}
+        </span>
+      </span>
+    );
+  }
   return (
-    <span
-      className={`damage-popup ${popup.kind}`}
-      style={
-        {
-          ["--col" as string]: popup.col,
-          ["--row" as string]: popup.row,
-        } as React.CSSProperties
-      }
-    >
+    <span className={`damage-popup ${popup.kind}`} style={positionStyle}>
       {popup.kind === "damage" ? <BurstIcon /> : <HeartIcon />}
       <span className="damage-popup-text">
         {popup.kind === "damage" ? "−" : "+"}
