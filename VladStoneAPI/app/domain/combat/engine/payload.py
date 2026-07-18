@@ -13,7 +13,12 @@ from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.statuses import all_status_specs
 from app.domain.combat.engine.tags import TAG_TOWER
 from app.domain.combat.engine.translate import translate_engine_events
-from app.domain.combat.engine.units import current_stance, effective_stats, unit_tags
+from app.domain.combat.engine.units import (
+    current_stance,
+    effective_stats,
+    stance_turns_left,
+    unit_tags,
+)
 from app.domain.combat.helpers import human_players
 from app.domain.combat.timing import turn_duration_seconds
 
@@ -36,6 +41,9 @@ def _unit_payload(unit, blueprint) -> dict:
         "move_steps": stats.move_steps,
         "attacks_per_turn": stats.attacks_per_turn,
         "stance": current_stance(unit, blueprint).value,
+        # V6: ходов до самостоятельной смены стойки (None = не сменится) —
+        # число на иконке стойки; клиент его не вычисляет.
+        "stance_turns_left": stance_turns_left(unit, blueprint),
         "is_tower": TAG_TOWER in tags,
         "statuses": [
             {"id": s.id, "stacks": s.stacks, "ttl": s.ttl} for s in unit.statuses

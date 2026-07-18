@@ -51,6 +51,7 @@ from app.domain.combat.engine.units import (
     current_stance,
     effective_stats,
     spawn_unit,
+    stance_turns_left,
     unit_tags,
 )
 from app.domain.combat.models import PlayerSide, PlayerState, UnitWaitReason
@@ -179,6 +180,8 @@ def board_snapshot(ctx: EffectContext) -> dict:
                 "current_hp": unit.current_hp,
                 "max_hp": effective_stats(unit, blueprint).hp,
                 "stance": current_stance(unit, blueprint).value,
+                # V6: счётчик стойки живёт и в покадровом реплее.
+                "stance_turns_left": stance_turns_left(unit, blueprint),
                 "is_tower": TAG_TOWER in unit_tags(unit, blueprint),
                 "remaining_steps": unit.remaining_steps,
                 "remaining_attacks": unit.remaining_attacks,

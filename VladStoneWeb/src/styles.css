@@ -2277,6 +2277,13 @@ nav {
   font-size: 16cqi;
   line-height: 1;
 }
+/* V6: остаток ходов конечной стойки — число рядом с иконкой (как HP). */
+.unit-v4-stance-count {
+  margin-left: 1px;
+  font-size: 0.86em;
+  font-weight: 800;
+}
+
 .unit-v4.stance-defense .unit-v4-stance {
   background: rgba(47, 104, 163, 0.92);
 }

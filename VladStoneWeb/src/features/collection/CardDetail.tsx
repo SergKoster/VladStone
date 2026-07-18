@@ -32,7 +32,13 @@ type CollectionMeta = Pick<CollectionCard, "ascension" | "copies">;
 type CoverageCell = { forward: number; col: number };
 type UnitDetailState = Pick<
   CombatUnit,
-  "attacks_per_turn" | "current_hp" | "damage" | "move_steps" | "stance" | "statuses"
+  | "attacks_per_turn"
+  | "current_hp"
+  | "damage"
+  | "move_steps"
+  | "stance"
+  | "stance_turns_left"
+  | "statuses"
 >;
 
 type DetailAction = {
@@ -111,6 +117,10 @@ export function CardDetail({
               {unit ? (
                 <span className={`card-detail-stance ${unit.stance}`}>
                   {unit.stance === "defense" ? "🛡 Защита" : "⚔ Атака"}
+                  {/* V6: конечная стойка показывает остаток ходов. */}
+                  {unit.stance_turns_left !== null
+                    ? ` · ещё ходов: ${unit.stance_turns_left}`
+                    : ""}
                 </span>
               ) : null}
               {collectionMeta ? (

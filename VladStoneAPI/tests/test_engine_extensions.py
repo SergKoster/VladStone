@@ -163,6 +163,31 @@ def test_modify_budget_applies_clamps_and_dies_with_the_turn() -> None:
 # --- №5.1: U1 — серверное объяснение бездействия ---
 
 
+def test_stance_turns_left_counts_program_and_forced_ttl() -> None:
+    """V6: остаток ходов стойки — серверное производное для иконки юнита."""
+    from app.domain.combat.engine.statuses import apply_forced_stance
+    from app.domain.combat.engine.units import stance_turns_left
+
+    warmup = make_blueprint("warmup2", stance_program=StanceProgram.warmup(2))
+    ctx = make_ctx(warmup)
+    unit = add_unit(ctx, uid="u1", owner="p1", row=4, col=0, bp="warmup2")
+    # Разогрев «Защита 2»: ход постановки → ещё 2, следующий → 1, потом Атака навсегда.
+    assert stance_turns_left(unit, warmup) == 2
+    unit.turns_on_field = 2
+    assert stance_turns_left(unit, warmup) == 1
+    unit.turns_on_field = 3
+    assert stance_turns_left(unit, warmup) is None
+    # Вечная стойка (always) — счётчика нет.
+    vanilla = ctx.blueprints["vanilla"]
+    always = add_unit(ctx, uid="u2", owner="p1", row=4, col=1)
+    assert stance_turns_left(always, vanilla) is None
+    # Наложенная стойка маскирует программу — остаток равен её ttl.
+    unit.statuses = apply_forced_stance(unit.statuses, stance=Stance.DEFENSE, ttl=3)
+    assert stance_turns_left(unit, warmup) == 3
+    unit.statuses = apply_forced_stance(unit.statuses, stance=Stance.DEFENSE, ttl=None)
+    assert stance_turns_left(unit, warmup) is None  # наложена без срока
+
+
 def test_unit_waited_marks_defender_without_target_once_and_preserves_state() -> None:
     defender_bp = make_blueprint(
         "defender",

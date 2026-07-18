@@ -169,6 +169,27 @@ def effective_stats(unit: UnitState, blueprint: UnitBlueprint) -> UnitStats:
     )
 
 
+def stance_turns_left(unit: UnitState, blueprint: UnitBlueprint) -> int | None:
+    """V6: ходов (включая текущий) до САМОСТОЯТЕЛЬНОЙ смены текущей стойки.
+
+    None = стойка сама не сменится (вечная фаза программы или наложение без
+    срока). Viewer-safe производное для UI: клиент показывает число на иконке
+    стойки и не вычисляет его сам (то же правило, что у unit_waited/U1).
+    Наложенная стойка маскирует программу — остаток равен её ttl.
+    """
+    for status in reversed(unit.statuses):
+        if status.id == STATUS_FORCED_STANCE:
+            return status.ttl  # None = наложена без срока
+    remaining = unit.turns_on_field
+    for phase in blueprint.stance_program.phases:
+        if phase.turns is None:
+            return None
+        if remaining <= phase.turns:
+            return phase.turns - remaining + 1
+        remaining -= phase.turns
+    raise AssertionError("unreachable: final phase is open-ended")
+
+
 def current_stance(unit: UnitState, blueprint: UnitBlueprint) -> Stance:
     """Текущая стойка — производное, не хранимое поле (ARCH §5.1, Q3).
 

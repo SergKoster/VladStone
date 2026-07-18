@@ -129,6 +129,7 @@ function mergeSnapshotUnit(
     move_steps: base?.move_steps ?? 0,
     attacks_per_turn: base?.attacks_per_turn ?? 0,
     stance: snapshot.stance,
+    stance_turns_left: snapshot.stance_turns_left ?? base?.stance_turns_left ?? null,
     is_tower: snapshot.is_tower,
     // Статусы пока не входят в облегчённый снапшот, а бюджеты действий нужны
     // покадрово: после каждого move/attack сервер уже присылает уменьшение.

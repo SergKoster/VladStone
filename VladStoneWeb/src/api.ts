@@ -54,6 +54,8 @@ export type CombatUnit = {
   move_steps: number;
   attacks_per_turn: number;
   stance: CombatStance;
+  /** V6: ходов (включая текущий) до самостоятельной смены стойки; null = не сменится. */
+  stance_turns_left: number | null;
   is_tower: boolean;
   statuses: CombatUnitStatus[];
   remaining_steps: number;
@@ -172,6 +174,8 @@ export type CombatSnapshotUnit = {
   current_hp: number;
   max_hp: number;
   stance: CombatStance;
+  /** V6: optional — снапшоты, сохранённые до поля, докатываются из состояния. */
+  stance_turns_left?: number | null;
   is_tower: boolean;
   remaining_steps: number;
   remaining_attacks: number;

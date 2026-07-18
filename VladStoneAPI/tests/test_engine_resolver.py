@@ -179,6 +179,8 @@ def test_board_snapshot_contract_and_unit_order_are_deterministic() -> None:
         "current_hp": 4,
         "max_hp": 4,
         "stance": "attack",
+        # V6: None = стойка сама не сменится (у Толстяка вечная Атака).
+        "stance_turns_left": None,
         "is_tower": False,
         "remaining_steps": 1,
         "remaining_attacks": 1,

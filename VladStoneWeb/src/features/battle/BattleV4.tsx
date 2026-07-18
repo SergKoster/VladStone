@@ -1407,11 +1407,15 @@ function UnitToken({
             {Math.max(0, unit.current_hp)}
           </span>
           <span
-            aria-label={unit.stance === "defense" ? "Стойка: защита" : "Стойка: атака"}
+            aria-label={stanceAria(unit)}
             className="unit-v4-stance"
-            title={unit.stance === "defense" ? "Защита" : "Атака"}
+            title={stanceTitle(unit)}
           >
             <span aria-hidden="true">{unit.stance === "defense" ? "🛡" : "⚔"}</span>
+            {/* V6: остаток ходов конечной стойки — как HP на сердечке. */}
+            {unit.stance_turns_left !== null ? (
+              <span className="unit-v4-stance-count">{unit.stance_turns_left}</span>
+            ) : null}
           </span>
           {unit.statuses.length > 0 ? (
             <span className="unit-v4-status">
@@ -1498,7 +1502,7 @@ function UnitInspector({
   const placementStyle = placement.side === "bottom"
     ? undefined
     : { left: placement.left, top: placement.top };
-  const stanceLabel = unit.stance === "defense" ? "Защита" : "Атака";
+  const stanceLabel = stanceTitle(unit);
   const stats = [
     { icon: <HeartIcon />, label: "Здоровье", value: Math.max(0, unit.current_hp) },
     { icon: <BurstIcon />, label: "Урон", value: unit.damage },
@@ -1567,6 +1571,17 @@ function UnitInspector({
       </section>
     </aside>
   );
+}
+
+function stanceTitle(unit: Pick<CombatUnit, "stance" | "stance_turns_left">): string {
+  const base = unit.stance === "defense" ? "Защита" : "Атака";
+  return unit.stance_turns_left !== null
+    ? `${base} · ещё ходов: ${unit.stance_turns_left}`
+    : base;
+}
+
+function stanceAria(unit: Pick<CombatUnit, "stance" | "stance_turns_left">): string {
+  return `Стойка: ${stanceTitle(unit).toLowerCase()}`;
 }
 
 function unitWaitLabel(reason: NonNullable<CombatEvent["wait_reason"]>) {
