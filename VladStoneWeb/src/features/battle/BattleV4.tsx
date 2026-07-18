@@ -63,6 +63,16 @@ type InspectorPlacement =
   | { side: "bottom" };
 
 type InspectedUnit = { unitId: string; placement: InspectorPlacement };
+// V8: запись клиентского журнала розыгрышей (события spell_cast/spawn публичны).
+type PlayLogEntry = {
+  key: number;
+  turn: number;
+  mine: boolean;
+  cardId: string;
+  row: number;
+  col: number;
+  kind: "spell" | "unit";
+};
 type CombatDetail = {
   cardId: string | null;
   fromHand: boolean;
@@ -134,6 +144,67 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   const [inspected, setInspected] = React.useState<InspectedUnit | null>(null);
   const detailSourceRef = React.useRef<HTMLElement | null>(null);
   const [detail, setDetail] = React.useState<CombatDetail | null>(null);
+
+  // V8: клиентский журнал розыгрышей. Серверный match.log в v4 пуст; журнал
+  // строится из событий завершённых ходов (розыгрыш публичен для обоих).
+  const [playLog, setPlayLog] = React.useState<PlayLogEntry[]>([]);
+  const [logHighlight, setLogHighlight] = React.useState<
+    { key: number; row: number; col: number } | null
+  >(null);
+  const playLogTurnsRef = React.useRef(new Set<string>());
+  const playLogKeyRef = React.useRef(0);
+  const logHighlightTimerRef = React.useRef<number | null>(null);
+
+  const recordPlays = React.useCallback((payload: CombatResponse) => {
+    const turn = payload.resolved_turn;
+    if (turn === null) return;
+    const dedupKey = `${payload.match.id}:${turn}`;
+    if (playLogTurnsRef.current.has(dedupKey)) return;
+    playLogTurnsRef.current.add(dedupKey);
+    const viewerSide = payload.match.players.find(
+      (p) => p.id === payload.match.viewer_id,
+    )?.side;
+    const entries: PlayLogEntry[] = [];
+    for (const event of payload.events) {
+      if (!event.card_id || !event.to_position) continue;
+      if (event.type === "spell_cast") {
+        entries.push({
+          key: ++playLogKeyRef.current,
+          turn,
+          mine: event.actor_id === payload.match.viewer_id,
+          cardId: event.card_id,
+          row: event.to_position.row,
+          col: event.to_position.col,
+          kind: "spell",
+        });
+      } else if (event.type === "spawn") {
+        // Актор спавна — юнит; его сторону даёт снапшот события.
+        const side = event.snapshot.units.find((u) => u.id === event.actor_id)?.side;
+        entries.push({
+          key: ++playLogKeyRef.current,
+          turn,
+          mine: side === viewerSide,
+          cardId: event.card_id,
+          row: event.to_position.row,
+          col: event.to_position.col,
+          kind: "unit",
+        });
+      }
+    }
+    if (entries.length) setPlayLog((prev) => [...prev, ...entries].slice(-24));
+  }, []);
+
+  function flashLogHighlight(entry: PlayLogEntry) {
+    if (logHighlightTimerRef.current !== null) {
+      window.clearTimeout(logHighlightTimerRef.current);
+    }
+    setLogHighlight({ key: entry.key, row: entry.row, col: entry.col });
+    // Тач не шлёт pointerleave — подсветка сама гаснет.
+    logHighlightTimerRef.current = window.setTimeout(
+      () => setLogHighlight(null),
+      1600,
+    );
+  }
 
   // V1: добранная карта определяется diff-ом СВОЕЙ руки до/после хода —
   // сервер её в событиях не раскрывает (анти-чит), но владелец видит свою
@@ -325,6 +396,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
         return;
       }
 
+      recordPlays(payload); // V8: журнал розыгрышей (свой дедуп по ходу)
       const playbackKey = responsePlaybackKey(payload);
       if (realtimePlaybackKeyRef.current === playbackKey) return;
       realtimePlaybackKeyRef.current = playbackKey;
@@ -422,6 +494,10 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       commitMatch(res.match);
       setPlanned([]);
       setSelected(null);
+      // V8: журнал живёт в рамках одного матча.
+      setPlayLog([]);
+      setLogHighlight(null);
+      playLogTurnsRef.current.clear();
     } finally {
       setBusy(false);
     }
@@ -567,6 +643,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       pendingRealtimeResolutionRef.current = null;
       setPlanned([]);
       setSelected(null);
+      recordPlays(res);
       await playTurn(preMatch, res.events, res.match, responsePlaybackKey(res));
       commitMatch(res.match);
       if (res.match.result.status !== "active") onBattleFinished();
@@ -582,6 +659,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
         realtimeResolution.resolved_turn === preMatch.turn &&
         realtimeResolution.events.length > 0;
       if (realtimeResolution && belongsToRequestedTurn) {
+        recordPlays(realtimeResolution);
         await playTurn(
           preMatch,
           realtimeResolution.events,
@@ -595,6 +673,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           fresh?.resolved_turn === preMatch.turn &&
           fresh.events.length > 0
         ) {
+          recordPlays(fresh);
           await playTurn(
             preMatch,
             fresh.events,
@@ -863,6 +942,19 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 </span>
               </span>
             ))}
+            {logHighlight ? (
+              // V8: «куда была разыграна карта» — кольцо над клеткой цели.
+              <span
+                aria-hidden="true"
+                className="log-target-ring"
+                style={
+                  {
+                    ["--col" as string]: logHighlight.col,
+                    ["--row" as string]: logHighlight.row,
+                  } as React.CSSProperties
+                }
+              />
+            ) : null}
             {popups.map((popup) => (
               <DamagePopupView
                 key={popup.key}
@@ -1069,9 +1161,37 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           {busy ? "Ход идёт..." : "Завершить ход"}
         </button>
 
-        <ul className="battle-log">
-          {visibleMatch.log.slice(-8).map((entry, i) => (
-            <li key={i}>{entry.message}</li>
+        {/* V8: журнал розыгрышей обеих сторон (серверный match.log в v4 пуст).
+            Куда легла карта — подсветкой клетки на ховере/тапе записи. */}
+        <ul aria-label="Лог розыгрышей" className="battle-log play-log">
+          {playLog.length === 0 ? (
+            <li className="play-log-empty">Розыгрышей пока не было</li>
+          ) : null}
+          {playLog.map((entry) => (
+            <li key={entry.key}>
+              <button
+                className={`play-log-entry${logHighlight?.key === entry.key ? " active" : ""}`}
+                onClick={() => flashLogHighlight(entry)}
+                onPointerEnter={(event) => {
+                  if (event.pointerType !== "touch") {
+                    setLogHighlight({ key: entry.key, row: entry.row, col: entry.col });
+                  }
+                }}
+                onPointerLeave={() =>
+                  setLogHighlight((cur) => (cur?.key === entry.key ? null : cur))
+                }
+                type="button"
+              >
+                <span aria-hidden="true" className={`play-log-side ${entry.mine ? "mine" : "enemy"}`} />
+                <span className="play-log-turn">х{entry.turn}</span>
+                <span aria-hidden="true" className="play-log-kind">
+                  {entry.kind === "spell" ? "✨" : "⚔"}
+                </span>
+                <span className="play-log-name">
+                  {catalog.get(entry.cardId)?.name ?? entry.cardId}
+                </span>
+              </button>
+            </li>
           ))}
         </ul>
       </section>

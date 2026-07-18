@@ -1808,6 +1808,37 @@ nav {
   border-radius: 0;
 }
 
+/* V8: кольцо «куда была разыграна карта» при ховере/тапе записи лога. */
+.log-target-ring {
+  position: absolute;
+  z-index: 12;
+  width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+  height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
+  transform: translate(
+    calc(var(--col) * (100% + var(--gap))),
+    calc(var(--row) * (100% + var(--gap)))
+  );
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 3px #1d8f9e,
+    0 0 14px rgb(29 143 158 / 0.55);
+  pointer-events: none;
+  animation: log-ring-pulse 800ms ease-in-out infinite alternate;
+}
+
+@keyframes log-ring-pulse {
+  from {
+    box-shadow:
+      inset 0 0 0 3px #1d8f9e,
+      0 0 8px rgb(29 143 158 / 0.4);
+  }
+  to {
+    box-shadow:
+      inset 0 0 0 3px #29b3c4,
+      0 0 18px rgb(29 143 158 / 0.7);
+  }
+}
+
 /* V7: применённое заклинание всплывает артом над клеткой цели и тает. */
 .spell-cast-float {
   position: absolute;
@@ -2601,6 +2632,65 @@ nav {
   line-height: 1.5;
   max-height: 140px;
   overflow-y: auto;
+}
+
+/* V8: лог розыгрышей — строки-кнопки с точкой стороны и именем карты. */
+.play-log {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  padding-left: 0;
+}
+.play-log-empty {
+  color: #7d8c84;
+}
+.play-log-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.play-log-entry:hover,
+.play-log-entry.active {
+  background: #dff0f2;
+  box-shadow: inset 0 0 0 1px #9ed2d9;
+}
+.play-log-side {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.play-log-side.mine {
+  background: #2d9d5f;
+}
+.play-log-side.enemy {
+  background: #d0443c;
+}
+.play-log-turn {
+  flex: none;
+  min-width: 22px;
+  color: #7d8c84;
+  font-weight: 700;
+}
+.play-log-kind {
+  flex: none;
+}
+.play-log-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
 }
 
 /* U2 (§23.4 п.4): на высоком десктопе логу отдаётся свободная правая область. */
