@@ -2627,6 +2627,17 @@ nav {
   opacity: 0.5;
 }
 
+/* V3: готовность выставлена — кнопка превращается в отмену. */
+.resolve-btn.ready {
+  background: #9d6b2d;
+}
+.ready-hint {
+  margin: -6px 0 0;
+  color: #6b7d75;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
 .battle-log {
   list-style: none;
   margin: 0;

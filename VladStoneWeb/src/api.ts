@@ -328,6 +328,35 @@ export function getActiveCombats() {
   return request<{ matches: CombatMatch[] }>("/combat/active");
 }
 
+// V3: интент-стриминг — сервер хранит последний план и применит его на
+// дедлайне; клиент шлёт с debounce по мере планирования.
+export function planCombat(
+  matchId: string,
+  turn: number,
+  placements: Placement[],
+  spells: SpellCast[] = [],
+) {
+  return request<{ ok: boolean; turn: number }>("/combat/plan", {
+    method: "POST",
+    body: JSON.stringify({ match_id: matchId, turn, placements, spells }),
+  });
+}
+
+// V3: «Готов» (несёт финальный план атомарно) или снятие готовности.
+// Резолв придёт по WS после окна бот-Готов (2 с).
+export function readyCombat(
+  matchId: string,
+  turn: number,
+  ready: boolean,
+  placements: Placement[],
+  spells: SpellCast[] = [],
+) {
+  return request<{ ok: boolean; turn: number; ready: boolean }>("/combat/ready", {
+    method: "POST",
+    body: JSON.stringify({ match_id: matchId, turn, ready, placements, spells }),
+  });
+}
+
 export function resolveCombat(
   matchId: string,
   turn: number,

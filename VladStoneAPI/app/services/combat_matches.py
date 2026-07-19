@@ -153,6 +153,24 @@ def expire_combat_match_if_outdated(record: CombatMatchRecord) -> bool:
     raw = json.loads(record.state_json)
     if raw.get("ruleset_version") == RULESET_VERSION:
         return False
+    _expire_raw_state(record, raw)
+    return True
+
+
+def expire_combat_match_unreadable(record: CombatMatchRecord) -> None:
+    """Погасить запись, чей state не парсится ТЕКУЩЕЙ моделью (V3-фикс).
+
+    Тот же принцип, что ruleset-гейт §8.7: нечитаемый state = чужой формат,
+    матч корректно гаснет (expired, не поражение). Случай из жизни: MVP-форма
+    состояния, ошибочно сохранённая с текущим `ruleset_version` в переходном
+    окне подмены движка, — такая запись проходит version-гейт, а её парс
+    убивал таймер-воркер целиком.
+    """
+    raw = json.loads(record.state_json)
+    _expire_raw_state(record, raw)
+
+
+def _expire_raw_state(record: CombatMatchRecord, raw: dict) -> None:
     # Patch the raw state shape-agnostically — works for any past version.
     raw["status"] = MatchLifecycleStatus.EXPIRED.value
     raw["planning_deadline"] = None
@@ -160,7 +178,6 @@ def expire_combat_match_if_outdated(record: CombatMatchRecord) -> bool:
     raw.setdefault("log", []).append({"message": RULESET_EXPIRED_MESSAGE})
     record.state_json = json.dumps(raw, ensure_ascii=False)
     record.status = MatchLifecycleStatus.EXPIRED.value
-    return True
 
 
 def expired_match_payload(match_id: str) -> dict:

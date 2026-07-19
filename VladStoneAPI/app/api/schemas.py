@@ -51,6 +51,12 @@ class ResolveTurnRequest(BaseModel):
     spells: list[SpellRequest] = Field(default_factory=list)
 
 
+class ReadyTurnRequest(ResolveTurnRequest):
+    """V3: готовность к резолву; несёт и финальный план (атомарно с флагом)."""
+
+    ready: bool = True
+
+
 class ClientEventRequest(BaseModel):
     event: str
     payload: dict[str, Any] = Field(default_factory=dict)

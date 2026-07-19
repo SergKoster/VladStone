@@ -1,5 +1,6 @@
 """HTTP-слой боя v4 (этап 15в): старт, резолв, каталог, WS, гейт, награда."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -21,7 +22,10 @@ from app.services.combat_matches import (
     load_v4_battle,
     save_v4_battle,
 )
-from app.services.combat_turn_timers import resolve_expired_planning_matches
+from app.services.combat_turn_timers import (
+    resolve_expired_planning_match,
+    resolve_expired_planning_matches,
+)
 
 
 def test_card_catalog_is_v4_content() -> None:
@@ -68,6 +72,151 @@ def test_start_serves_a_v4_board_with_towers() -> None:
     # 10 башен на призрачных рядах.
     towers = [u for u in match["units"] if u["is_tower"]]
     assert len(towers) == 10 and {u["row"] for u in towers} == {-1, 5}
+
+
+def test_streamed_plan_is_applied_on_deadline_resolve() -> None:
+    """V3: дедлайн резолвит ПОСЛЕДНИЙ присланный план, а не пустой ход."""
+    client = TestClient(create_app())
+    match = client.post("/api/combat/start").json()["match"]
+    viewer = next(p for p in match["players"] if p["id"] == match["viewer_id"])
+    catalog = {c["id"]: c for c in client.get("/api/combat/catalog").json()["cards"]}
+    unit = next(
+        cid for cid in viewer["hand"]
+        if catalog[cid]["card_type"] == "unit" and catalog[cid]["cost"] <= 2
+    )
+    plan = client.post(
+        "/api/combat/plan",
+        json={
+            "match_id": match["id"],
+            "turn": 1,
+            "placements": [{"card_id": unit, "row": 4, "col": 2}],
+        },
+    )
+    assert plan.status_code == 200 and plan.json()["ok"] is True
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match["id"])
+        state = load_v4_battle(record)
+        assert state.pending_plans  # план сохранён в состоянии матча
+        resolved = resolve_expired_planning_match(
+            db, record, now=state.planning_deadline + timedelta(seconds=1)
+        )
+        assert resolved is not None
+        db.commit()
+    spawned = [
+        e for e in resolved.events if e.kind == "spawned" and e.card_id == unit
+    ]
+    assert spawned, "юнит из сохранённого плана обязан быть поставлен"
+    # Планы и готовность живут в рамках одного хода.
+    assert resolved.state.pending_plans == {}
+    assert resolved.state.ready_player_ids == []
+
+
+def test_ready_resolves_early_after_bot_delay() -> None:
+    """V3: бот «жмёт Готов» через 2 с после игрока — потом ранний резолв."""
+    client = TestClient(create_app())
+    match = client.post("/api/combat/start").json()["match"]
+    ready = client.post(
+        "/api/combat/ready",
+        json={"match_id": match["id"], "turn": 1, "ready": True},
+    )
+    assert ready.status_code == 200 and ready.json()["ready"] is True
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match["id"])
+        state = load_v4_battle(record)
+        assert state.ready_since is not None
+        ready_since = state.ready_since
+        # Внутри окна отмены раннего резолва нет.
+        assert (
+            resolve_expired_planning_match(
+                db, record, now=ready_since + timedelta(seconds=1)
+            )
+            is None
+        )
+        # Окно истекло — ход резолвится задолго до дедлайна.
+        resolved = resolve_expired_planning_match(
+            db, record, now=ready_since + timedelta(seconds=3)
+        )
+        assert resolved is not None and resolved.resolved_turn == 1
+        db.commit()
+
+
+def test_timer_tick_survives_unreadable_state_and_expires_it() -> None:
+    """V3-фикс: запись с нечитаемым state гасится, не убивая тик воркера.
+
+    Реальный кейс из дев-БД: MVP-форма состояния, ошибочно сохранённая с
+    ТЕКУЩИМ ruleset_version в переходном окне подмены движка. Она проходит
+    version-гейт, а её парс раньше молча убивал корутину воркера — таймеры
+    всех матчей вставали.
+    """
+    client = TestClient(create_app())
+    match = client.post("/api/combat/start").json()["match"]  # здоровый сосед
+    broken_id = f"local_pve_{uuid4().hex}"
+    with SessionLocal() as db:
+        db.add(
+            CombatMatchRecord(
+                id=broken_id,
+                owner_user_id=None,
+                status="planning",
+                state_json=json.dumps(
+                    {
+                        "id": broken_id,
+                        "ruleset_version": RULESET_VERSION,
+                        "status": "planning",
+                        "units": [
+                            {
+                                "id": "bot_ranger",
+                                "card_id": "test_ranger",
+                                "owner_id": "bot",
+                                "position": {"row": 1, "col": 0},
+                                "current_hp": 1,
+                            }
+                        ],
+                    }
+                ),
+            )
+        )
+        db.commit()
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match["id"])
+        deadline = load_v4_battle(record).planning_deadline
+        resolved = resolve_expired_planning_matches(
+            db, now=deadline + timedelta(seconds=1)
+        )
+        # Тик пережил битую запись и дорезолвил здорового соседа.
+        assert any(r.state.id == match["id"] for r in resolved)
+        broken = db.get(CombatMatchRecord, broken_id)
+        assert broken.status == "expired"
+        raw = json.loads(broken.state_json)
+        assert raw["status"] == "expired"
+        assert raw["result"]["status"] == "expired"
+
+
+def test_unready_within_window_cancels_early_resolve() -> None:
+    """V3: снятие готовности в окне 2 с — бот тоже «не жмёт», резолва нет."""
+    client = TestClient(create_app())
+    match = client.post("/api/combat/start").json()["match"]
+    client.post(
+        "/api/combat/ready", json={"match_id": match["id"], "turn": 1, "ready": True}
+    )
+    unready = client.post(
+        "/api/combat/ready", json={"match_id": match["id"], "turn": 1, "ready": False}
+    )
+    assert unready.status_code == 200 and unready.json()["ready"] is False
+
+    with SessionLocal() as db:
+        record = db.get(CombatMatchRecord, match["id"])
+        state = load_v4_battle(record)
+        assert state.ready_since is None and state.ready_player_ids == []
+        # Далеко за окном, но до дедлайна — резолва нет.
+        assert (
+            resolve_expired_planning_match(
+                db, record, now=datetime.now(UTC) + timedelta(seconds=10)
+            )
+            is None
+        )
 
 
 def test_resolve_plays_a_card_and_advances_the_turn() -> None:

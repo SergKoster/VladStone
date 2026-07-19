@@ -6,9 +6,14 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.api.schemas import ResolveTurnRequest
+from app.api.schemas import ReadyTurnRequest, ResolveTurnRequest
 from app.db.session import get_db
-from app.domain.combat.engine.battle import create_v4_battle, resolve_v4_turn
+from app.domain.combat.engine.battle import (
+    create_v4_battle,
+    resolve_v4_turn,
+    set_player_ready,
+    store_pending_plan,
+)
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.payload import (
     v4_catalog_payload,
@@ -119,6 +124,102 @@ async def get_combat_match(
             resolved_turn=resolved.resolved_turn,
         )
     return v4_combat_response(load_v4_battle(record))
+
+
+@router.post("/plan")
+async def submit_turn_plan(
+    payload: ResolveTurnRequest,
+    db: DbSession,
+    refresh_token: RefreshTokenCookie = None,
+) -> dict:
+    """V3: интент-стриминг — сохранить последний план хода (без резолва).
+
+    Дедлайн/ранний резолв применят именно этот план; клиент шлёт его по мере
+    планирования с debounce. Просроченный ход — 409, результат придёт по WS.
+    """
+    state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    human = human_players(state)[0]
+    store_pending_plan(state, human.id, _build_intents(human.id, payload))
+    _save_state_or_409(db, record, state)
+    return {"ok": True, "turn": state.turn}
+
+
+@router.post("/ready")
+async def set_turn_readiness(
+    payload: ReadyTurnRequest,
+    db: DbSession,
+    refresh_token: RefreshTokenCookie = None,
+) -> dict:
+    """V3: «Готов» (с финальным планом атомарно) или снятие готовности.
+
+    Резолв здесь НЕ происходит: когда готовы все люди, бот «жмёт Готов» через
+    BOT_READY_DELAY_SECONDS (окно отмены), после чего ход дорезолвит
+    таймер-воркер/ленивый путь и разошлёт результат по WS.
+    """
+    state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    human = human_players(state)[0]
+    store_pending_plan(state, human.id, _build_intents(human.id, payload))
+    set_player_ready(state, human.id, ready=payload.ready, now=datetime.now(UTC))
+    audit(
+        db,
+        record.owner_user_id,
+        "combat.turn_ready" if payload.ready else "combat.turn_unready",
+        {"match_id": state.id, "turn": state.turn},
+    )
+    _save_state_or_409(db, record, state)
+    return {"ok": True, "turn": state.turn, "ready": payload.ready}
+
+
+async def _load_planning_state_or_409(
+    db: Session,
+    payload: ResolveTurnRequest,
+    refresh_token: str | None,
+):
+    """Общие ворота /plan и /ready: гейты, ленивый дорезолв, актуальность хода."""
+    record = _get_authorized_record(db, payload.match_id, refresh_token)
+    if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
+        await match_channel_manager.broadcast_expired(payload.match_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat ruleset changed; match expired",
+        )
+    resolved = _resolve_expired_record_if_needed(db, record)
+    if resolved is not None:
+        await match_channel_manager.broadcast_match_update(
+            resolved.state,
+            events=resolved.events,
+            resolved_turn=resolved.resolved_turn,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat turn deadline has passed",
+        )
+    state = load_v4_battle(record)
+    if state.status != MatchLifecycleStatus.PLANNING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Combat match is {state.status.value}",
+        )
+    if payload.turn != state.turn:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat turn is no longer current",
+        )
+    return state, record
+
+
+def _save_state_or_409(db: Session, record, state) -> None:
+    save_v4_battle(record, state)
+    try:
+        db.commit()
+    except StaleDataError:
+        # Ход конкурентно дорезолвлен (воркер/дедлайн) — план опоздал; клиент
+        # получит результат по WS и пришлёт план следующего хода.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Combat turn was already resolved elsewhere",
+        ) from None
 
 
 @router.post("/resolve")

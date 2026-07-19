@@ -10,7 +10,8 @@ import {
   type Placement,
   type SpellCast,
   getCombat,
-  resolveCombat,
+  planCombat,
+  readyCombat,
   startCombat,
 } from "../../api";
 import { CardArt } from "../../shared/cardArt";
@@ -110,10 +111,9 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     spellCasts,
     waitedUnits,
   } = useTurnPlayback();
-  // Синхронный флаг для WS-обработчика: React-state обновляется не сразу, а
-  // echo собственного resolve может прилететь раньше HTTP-ответа и показать
-  // финальное поле перед запуском плеера.
-  const isResolvingRef = React.useRef(false);
+  // V3: готовность к резолву. Пока готов — планирование заморожено; резолв
+  // придёт по WS/поллингу, когда бот «нажмёт Готов» (2 с) или по дедлайну.
+  const [isReady, setIsReady] = React.useState(false);
   // Перетаскивание карты руки на клетку (pointer events — мышь и тач одним путём).
   const dragRef = React.useRef<{
     cardId: string;
@@ -130,14 +130,8 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     valid: boolean;
     name: string;
   } | null>(null);
-  const autoSubmittedDeadline = React.useRef<string | null>(null);
+  const autoReadyDeadline = React.useRef<string | null>(null);
   const realtimePlaybackKeyRef = React.useRef<string | null>(null);
-  // Полноценное WS-эхо не выбрасываем во время собственного HTTP resolve:
-  // при гонке с таймером именно оно может оказаться единственной лентой хода.
-  const pendingRealtimeResolutionRef = React.useRef<CombatResponse | null>(null);
-  const realtimeResolutionWaiterRef = React.useRef<
-    ((payload: CombatResponse) => void) | null
-  >(null);
   const inspectorCloseTimerRef = React.useRef<number | null>(null);
   const inspectedTokenRef = React.useRef<HTMLElement | null>(null);
   const lastInspectorPointerTypeRef = React.useRef<string | null>(null);
@@ -324,7 +318,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   }
 
   function canChooseCard(cardId: string): boolean {
-    if (busy || isAnimating || isFinished) return false;
+    if (busy || isAnimating || isFinished || isReady) return false;
     const card = catalog.get(cardId);
     if (!card) return false;
     const plannedCopies = planned.filter((plan) => plan.card_id === cardId).length;
@@ -362,23 +356,16 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     [],
   );
 
-  // --- realtime: server-pushed updates (timer resolves, own resolve echo) ---
+  // --- realtime: server-pushed updates. V3: клиент сам ход НЕ резолвит —
+  // любой результат (ранний по готовности или дедлайн) приходит сюда. ---
   React.useEffect(() => {
     if (!match) return undefined;
     const clearPlans = () => {
       setPlanned([]);
       setSelected(null);
+      setIsReady(false); // V3: новый ход — готовность снята
     };
     const consumeResolution = (payload: CombatResponse) => {
-      // R1: broadcast собственного resolve может обогнать HTTP-ответ. Не даём
-      // ему показать финальный кадр, но сохраняем полную ленту на случай 409.
-      if (isResolvingRef.current) {
-        if (payload.events.length > 0) {
-          pendingRealtimeResolutionRef.current = payload;
-          realtimeResolutionWaiterRef.current?.(payload);
-        }
-        return;
-      }
       const preMatch = matchRef.current;
       if (!preMatch) {
         commitMatch(payload.match);
@@ -403,6 +390,8 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       void playTurn(preMatch, payload.events, payload.match, playbackKey)
         .then((result) => {
           if (result !== "busy") commitMatch(payload.match);
+          // V3: финал матча тоже приходит этим путём (клиент сам не резолвит).
+          if (payload.match.result.status !== "active") onBattleFinished();
         })
         .catch(() => commitMatch(payload.match))
         .finally(() => {
@@ -458,29 +447,55 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     return () => window.clearInterval(id);
   }, [isAnimating, match?.planning_deadline, match?.status, planningSeconds]);
 
+  // V3: на нуле видимого таймера клиент авто-жмёт «Готов» (темп хода). Даже
+  // если этот запрос проиграет гонку, серверный дедлайн сам применит
+  // последний застримленный план — план игрока больше не сгорает.
   React.useEffect(() => {
     if (
       !match?.planning_deadline ||
       match.status !== "planning" ||
       secondsLeft > 0 ||
       busy ||
-      isAnimating
+      isAnimating ||
+      isReady
     ) {
       return;
     }
     const deadlineKey = `${match.id}:${match.turn}:${match.planning_deadline}`;
-    if (autoSubmittedDeadline.current === deadlineKey) return;
-    autoSubmittedDeadline.current = deadlineKey;
-    void handleResolve();
+    if (autoReadyDeadline.current === deadlineKey) return;
+    autoReadyDeadline.current = deadlineKey;
+    void handleReadyToggle();
   }, [
     busy,
     isAnimating,
+    isReady,
     match?.id,
     match?.planning_deadline,
     match?.status,
     match?.turn,
     secondsLeft,
   ]);
+
+  // V3: интент-стриминг — последний план уезжает на сервер с debounce;
+  // дедлайн применит именно его. После «Готов» план заморожен и уже отправлен.
+  React.useEffect(() => {
+    if (!match || match.status !== "planning" || isAnimating || isFinished || isReady) {
+      return undefined;
+    }
+    const matchId = match.id;
+    const turn = match.turn;
+    const timer = window.setTimeout(() => {
+      const placements: Placement[] = planned
+        .filter((p): p is PlannedUnit => p.kind === "unit")
+        .map(({ card_id, row, col }) => ({ card_id, row, col }));
+      const spells: SpellCast[] = planned
+        .filter((p): p is PlannedSpell => p.kind === "spell")
+        .map(({ card_id, row, col }) => ({ card_id, row, col }));
+      // Ошибки не критичны: следующий debounce или «Готов» перешлют план.
+      void planCombat(matchId, turn, placements, spells).catch(() => undefined);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [planned, match?.id, match?.turn, match?.status, isAnimating, isFinished, isReady]);
 
   React.useEffect(() => {
     if (isFinished) setResultDismissed(false);
@@ -498,6 +513,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       setPlayLog([]);
       setLogHighlight(null);
       playLogTurnsRef.current.clear();
+      setIsReady(false);
     } finally {
       setBusy(false);
     }
@@ -522,7 +538,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   // Общая точка размещения — и клик-путь, и drag-n-drop идут через неё
   // (одинаковые проверки маны/зоны/занятости). true — карта запланирована.
   function placeCard(cardId: string, row: number, col: number): boolean {
-    if (busy || isAnimating || isFinished) return false;
+    if (busy || isAnimating || isFinished || isReady) return false;
     const card = catalog.get(cardId);
     if (!card) return false;
     if (plannedCost + card.cost > (viewer?.mana ?? 0)) return false;
@@ -626,71 +642,31 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     openDetail({ cardId, fromHand: true }, source);
   }
 
-  async function handleResolve() {
+  // V3: клиент больше не резолвит ход сам. Кнопка — «Готов»/«Отменить
+  // готовность»; резолв случится на сервере (бот-Готов через 2 с или дедлайн)
+  // и придёт полноценным envelope по WS/поллингу в consumeResolution.
+  async function handleReadyToggle() {
     if (!match || busy || isAnimating || isFinished) return;
-    const preMatch = match;
     const placements: Placement[] = planned
       .filter((p): p is PlannedUnit => p.kind === "unit")
       .map(({ card_id, row, col }) => ({ card_id, row, col }));
     const spells: SpellCast[] = planned
       .filter((p): p is PlannedSpell => p.kind === "spell")
       .map(({ card_id, row, col }) => ({ card_id, row, col }));
-    pendingRealtimeResolutionRef.current = null;
-    isResolvingRef.current = true;
+    const nextReady = !isReady;
     setBusy(true);
     try {
-      const res = await resolveCombat(match.id, match.turn, placements, spells);
-      pendingRealtimeResolutionRef.current = null;
-      setPlanned([]);
-      setSelected(null);
-      recordPlays(res);
-      await playTurn(preMatch, res.events, res.match, responsePlaybackKey(res));
-      commitMatch(res.match);
-      if (res.match.result.status !== "active") onBattleFinished();
+      await readyCombat(match.id, match.turn, nextReady, placements, spells);
+      setIsReady(nextReady);
     } catch {
-      // Дедлайн истёк / ход уже дорезолвлен таймером или конкурентом (409):
-      // сначала ждём полноценное WS-эхо. Eventless GET — только fallback,
-      // иначе он успевает показать финал и лишает реплей исходного состояния.
-      const realtimeResolution =
-        pendingRealtimeResolutionRef.current ??
-        (await waitForRealtimeResolution(realtimeResolutionWaiterRef));
-      const belongsToRequestedTurn =
-        realtimeResolution?.match.id === preMatch.id &&
-        realtimeResolution.resolved_turn === preMatch.turn &&
-        realtimeResolution.events.length > 0;
-      if (realtimeResolution && belongsToRequestedTurn) {
-        recordPlays(realtimeResolution);
-        await playTurn(
-          preMatch,
-          realtimeResolution.events,
-          realtimeResolution.match,
-          responsePlaybackKey(realtimeResolution),
-        );
-        commitMatch(realtimeResolution.match);
-      } else {
-        const fresh = await getCombat(match.id).catch(() => null);
-        if (
-          fresh?.resolved_turn === preMatch.turn &&
-          fresh.events.length > 0
-        ) {
-          recordPlays(fresh);
-          await playTurn(
-            preMatch,
-            fresh.events,
-            fresh.match,
-            responsePlaybackKey(fresh),
-          );
-          commitMatch(fresh.match);
-        } else if (fresh) {
-          commitMatch(fresh.match);
-        }
-      }
-      setPlanned([]);
-      setSelected(null);
+      // 409: ход уже дорезолвлен (дедлайн/воркер) — результат придёт по WS;
+      // отдельный fallback — поллинг matchRealtime при упавшем WS.
+      setIsReady(false);
+      const fresh = await getCombat(match.id).catch(() => null);
+      if (fresh && fresh.events.length === 0) commitMatch(fresh.match);
+      // Полный envelope (fresh с events) сыграет consumeResolution по WS;
+      // GET здесь — только чтобы не застрять на устаревшем ходе без WS.
     } finally {
-      realtimeResolutionWaiterRef.current = null;
-      pendingRealtimeResolutionRef.current = null;
-      isResolvingRef.current = false;
       setBusy(false);
     }
   }
@@ -823,7 +799,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                     .join(" ")}
                   data-row={row}
                   data-col={col}
-                  disabled={busy || isAnimating || isFinished}
+                  disabled={busy || isAnimating || isFinished || isReady}
                   onClick={() => handleCellClick(row, col)}
                 >
                   {plan && !unit ? (
@@ -868,7 +844,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                   // U5: на клетке юнита лежит спелл-план — обычный клик отменяет
                   // его, как на пустой клетке (тот же handleCellClick-путь).
                   if (
-                    !busy && !isAnimating && !isFinished &&
+                    !busy && !isAnimating && !isFinished && !isReady &&
                     plannedAt(unit.row, unit.col)
                   ) {
                     handleCellClick(unit.row, unit.col);
@@ -1050,11 +1026,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                disabled={
-                  busy ||
-                  isAnimating ||
-                  isFinished
-                }
+                disabled={busy || isAnimating || isFinished || isReady}
                 onClick={(event) => handleCardClick(cardId, event.currentTarget)}
                 onPointerDown={(e) => handleCardPointerDown(e, cardId)}
                 onPointerMove={handleCardPointerMove}
@@ -1127,7 +1099,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                         <button
                           aria-label={`Отменить: ${card?.name ?? plan.card_id}`}
                           className="plan-summary-remove"
-                          disabled={busy || isAnimating || isFinished}
+                          disabled={busy || isAnimating || isFinished || isReady}
                           onClick={() =>
                             setPlanned((cur) => cur.filter((_, i) => i !== index))
                           }
@@ -1140,7 +1112,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
                 </ul>
                 <button
                   className="ghost-btn plan-summary-clear"
-                  disabled={busy || isAnimating || isFinished}
+                  disabled={busy || isAnimating || isFinished || isReady}
                   onClick={() => {
                     setPlanned([]);
                     setSelected(null);
@@ -1153,13 +1125,18 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           </section>
         ) : null}
 
+        {/* V3: «Готов» вместо мгновенного резолва; бот отвечает через 2 с —
+            окно, в котором готовность можно снять и поменять план. */}
         <button
-          className="resolve-btn"
+          className={isReady ? "resolve-btn ready" : "resolve-btn"}
           disabled={busy || isAnimating || isFinished}
-          onClick={handleResolve}
+          onClick={handleReadyToggle}
         >
-          {busy ? "Ход идёт..." : "Завершить ход"}
+          {busy ? "..." : isReady ? "Отменить готовность" : "Готов"}
         </button>
+        {isReady ? (
+          <p className="ready-hint">Готово — соперник отвечает…</p>
+        ) : null}
 
         {/* V8: журнал розыгрышей обеих сторон (серверный match.log в v4 пуст).
             Куда легла карта — подсветкой клетки на ховере/тапе записи. */}
@@ -1212,22 +1189,6 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       ) : null}
     </div>
   );
-}
-
-function waitForRealtimeResolution(
-  waiterRef: React.MutableRefObject<((payload: CombatResponse) => void) | null>,
-): Promise<CombatResponse | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (payload: CombatResponse | null) => {
-      if (settled) return;
-      settled = true;
-      waiterRef.current = null;
-      resolve(payload);
-    };
-    waiterRef.current = finish;
-    window.setTimeout(() => finish(null), 750);
-  });
 }
 
 function TowerRow({

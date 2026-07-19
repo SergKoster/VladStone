@@ -47,6 +47,9 @@ from app.domain.combat.timing import resolution_buffer_seconds, turn_duration_se
 HAND_START_SIZE = 3
 # Ход, на котором наступает «суд» (§17, решение владельца — O10-ручка).
 JUDGEMENT_TURN = 50
+# V3 (решение владельца): бот «жмёт Готов» через N секунд после игрока —
+# окно, в котором игрок может снять готовность и поменять план.
+BOT_READY_DELAY_SECONDS = 2
 
 
 class BattleStateV4(BaseModel):
@@ -70,6 +73,13 @@ class BattleStateV4(BaseModel):
     # терять реплей, если HTTP-ответ или живой WS-broadcast его не достигли.
     last_resolved_turn: int | None = Field(default=None, ge=1)
     last_events: list[EngineEvent] = Field(default_factory=list)
+    # V3 — интент-стриминг (ARCH §5.2): последний присланный план каждого
+    # игрока; дедлайн резолвит ЕГО, а не пустой ход. Готовность — список id;
+    # ready_since ставится, когда готовы ВСЕ люди: спустя BOT_READY_DELAY_
+    # SECONDS боты «жмут Готов» и наступает ранний резолв (окно отмены).
+    pending_plans: dict[str, PlayerIntents] = Field(default_factory=dict)
+    ready_player_ids: list[str] = Field(default_factory=list)
+    ready_since: datetime | None = None
 
 
 def build_context(state: BattleStateV4) -> EffectContext:
@@ -130,6 +140,40 @@ def create_v4_battle(
     return state
 
 
+def store_pending_plan(
+    state: BattleStateV4, player_id: str, intents: PlayerIntents
+) -> None:
+    """Запомнить последний план игрока (перезапись целиком, V3)."""
+    state.pending_plans[player_id] = intents
+
+
+def set_player_ready(
+    state: BattleStateV4, player_id: str, *, ready: bool, now: datetime
+) -> None:
+    """Выставить/снять готовность; ready_since живёт, пока готовы ВСЕ люди."""
+    ready_ids = set(state.ready_player_ids)
+    if ready:
+        ready_ids.add(player_id)
+    else:
+        ready_ids.discard(player_id)
+    state.ready_player_ids = sorted(ready_ids)
+    humans = [p.id for p in state.players if not p.is_bot]
+    all_humans_ready = bool(humans) and all(pid in ready_ids for pid in humans)
+    state.ready_since = _as_utc(now) if all_humans_ready else None
+
+
+def is_early_resolve_due(state: BattleStateV4, *, now: datetime) -> bool:
+    """Ранний резолв: люди готовы и окно отмены (бот-Готов) истекло."""
+    if state.ready_since is None:
+        return False
+    return _as_utc(now) >= state.ready_since + timedelta(seconds=BOT_READY_DELAY_SECONDS)
+
+
+def pending_intents_for(state: BattleStateV4, player_id: str) -> PlayerIntents:
+    """Последний присланный план игрока; нет плана — пустой ход."""
+    return state.pending_plans.get(player_id) or PlayerIntents(player_id=player_id)
+
+
 def resolve_v4_turn(
     state: BattleStateV4,
     *,
@@ -163,6 +207,10 @@ def resolve_v4_turn(
     apply_context(state, ctx)
     state.last_resolved_turn = resolved_turn
     state.last_events = events
+    # V3: планы и готовность живут в рамках одного хода.
+    state.pending_plans = {}
+    state.ready_player_ids = []
+    state.ready_since = None
 
     _advance_turn_and_check_end(state, ctx, forced=forced, num_events=len(events), now=checked_at)
     return events
