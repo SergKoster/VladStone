@@ -113,6 +113,7 @@ textarea::placeholder { color: #64748b; }
 .confidence div { display: flex; gap: 7px; }
 .confidence button { width: 37px; height: 34px; border: 1px solid #3b4e6a; border-radius: 8px; color: #cbd5e1; background: #0f172a; font-weight: 700; }
 .confidence button.selected { border-color: #6ee7b7; color: #052e2b; background: #6ee7b7; }
+.confidence-help { margin: 9px 0 0; color: #94a3b8; font-size: .76rem; line-height: 1.4; }
 
 .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
 .text-button { padding: 0; border: 0; color: #a7f3d0; background: none; font-size: .84rem; font-weight: 700; }
@@ -137,7 +138,7 @@ textarea::placeholder { color: #64748b; }
 .course-panel li button { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 8px 5px; border: 0; border-radius: 7px; color: #cbd5e1; text-align: left; background: transparent; line-height: 1.27; }
 .course-panel li button:hover { background: #243249; }
 .course-panel li span { flex: 0 0 auto; width: 24px; color: #94a3b8; font-size: .75rem; font-weight: 800; }
-.course-panel li.done span { color: #6ee7b7; }
+.course-panel li.seen span { color: #6ee7b7; }
 .course-panel li.current button { color: #f8fafc; font-weight: 800; }
 .course-panel li.current span { color: #fbbf24; }
 .sync-note { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid #2b3b53; color: #94a3b8; font-size: .76rem; line-height: 1.5; }

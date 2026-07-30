@@ -14,7 +14,41 @@ type CourseChapter = {
   title: string;
   sourcePath: string;
   body: string;
+  cards: {
+    id: string;
+    prompt: string;
+    expectedAnswer: string;
+    tag: string;
+    chapterId: string;
+  }[];
 };
+
+function numberedItems(text: string) {
+  return text
+    .trim()
+    .split(/\r?\n(?=\d+\.\s+)/)
+    .map((item) => item.replace(/^\d+\.\s+/, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function extractSelfCheckCards(chapterId: string, body: string) {
+  const section = body.match(
+    /^#{2,3}\s+Самопроверка[^\n]*\n([\s\S]*?)\n<details>\s*\n<summary>[^<]*ответ[^<]*<\/summary>\s*\n([\s\S]*?)<\/details>/im,
+  );
+  if (!section) return [];
+
+  const prompts = numberedItems(section[1]);
+  const expectedAnswers = numberedItems(section[2]);
+  return prompts
+    .map((prompt, index) => ({
+      id: `chapter-${chapterId}-${index + 1}`,
+      prompt,
+      expectedAnswer: expectedAnswers[index] ?? "Сверь ответ с материалом главы и назови первую ошибочную предпосылку.",
+      tag: `chapter-${chapterId}`,
+      chapterId,
+    }))
+    .filter((card) => Boolean(card.expectedAnswer));
+}
 
 async function readCourse(): Promise<CourseChapter[]> {
   const files = (await readdir(courseRoot))
@@ -30,6 +64,7 @@ async function readCourse(): Promise<CourseChapter[]> {
         title,
         sourcePath: `docs/learning/course/${file}`,
         body,
+        cards: extractSelfCheckCards(file.slice(0, 2), body),
       };
     }),
   );
@@ -42,7 +77,8 @@ async function readAnki() {
     .filter(Boolean)
     .map((line, index) => {
       const [prompt, expectedAnswer, tag = "review"] = line.split("\t");
-      return { id: `anki-${index + 1}`, prompt, expectedAnswer, tag };
+      const chapterId = tag === "gl1" ? "01" : "02";
+      return { id: `anki-${index + 1}`, prompt, expectedAnswer, tag, chapterId };
     });
 }
 
@@ -52,9 +88,9 @@ function localLearningApi(): Plugin {
     configureServer(server) {
       server.middlewares.use("/api/bootstrap", async (_request, response) => {
         try {
-          const [chapters, cards] = await Promise.all([readCourse(), readAnki()]);
+          const [chapters, ankiCards] = await Promise.all([readCourse(), readAnki()]);
           response.setHeader("Content-Type", "application/json; charset=utf-8");
-          response.end(JSON.stringify({ chapters, cards }));
+          response.end(JSON.stringify({ chapters, ankiCards }));
         } catch (error) {
           response.statusCode = 500;
           response.end(JSON.stringify({ error: String(error) }));

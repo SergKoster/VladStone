@@ -1,25 +1,28 @@
-export type CourseChapter = {
-  id: string;
-  title: string;
-  sourcePath: string;
-  body: string;
-};
-
 export type LearningCard = {
   id: string;
   prompt: string;
   expectedAnswer: string;
   tag: string;
+  chapterId: string;
   hint?: string;
   source: string;
+  kind: "bridge" | "course" | "anki";
+};
+
+export type CourseChapter = {
+  id: string;
+  title: string;
+  sourcePath: string;
+  body: string;
+  cards: Omit<LearningCard, "source" | "kind">[];
 };
 
 export type Bootstrap = {
   chapters: CourseChapter[];
-  cards: Omit<LearningCard, "source">[];
+  ankiCards: Omit<LearningCard, "source" | "kind">[];
 };
 
-export type AnswerResult = "understood" | "review";
+export type SelfAssessment = "understood" | "review";
 
 export type AnswerRecord = {
   questionId: string;
@@ -27,9 +30,16 @@ export type AnswerRecord = {
   source: string;
   answer: string;
   confidence: number;
-  result: AnswerResult;
+  selfAssessment: SelfAssessment;
   hintsOpened: number;
   answeredAt: string;
+};
+
+export type CardSchedule = {
+  level: number;
+  dueAt: string;
+  lastSelfAssessment: SelfAssessment;
+  lastAnsweredAt: string;
 };
 
 export type LearningProgress = {
@@ -37,6 +47,7 @@ export type LearningProgress = {
   currentChapterId: string;
   preferredLength: 5 | 10 | 15;
   answers: AnswerRecord[];
+  cardSchedules: Record<string, CardSchedule>;
   completedSessions: { completedAt: string; questionIds: string[] }[];
   updatedAt: string;
 };
