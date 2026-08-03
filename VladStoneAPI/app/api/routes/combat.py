@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.schemas import ReadyTurnRequest, ResolveTurnRequest
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.domain.combat.engine.battle import (
     create_v4_battle,
@@ -40,12 +41,16 @@ from app.services.combat_turn_timers import (
     ResolvedPlanningMatch,
     resolve_expired_planning_match,
 )
+from app.services.rate_limit import allow_attempt
 from app.services.rewards import claim_combat_reward
 
 router = APIRouter(prefix="/combat", tags=["combat"])
 DbSession = Annotated[Session, Depends(get_db)]
 RefreshTokenCookie = Annotated[str | None, Cookie()]
 STALE_MATCH_TTL_HOURS = 24
+EXTERNAL_ENVIRONMENTS = {"production", "staging"}
+START_LIMIT = 10
+TURN_ACTION_LIMIT = 60
 
 
 @router.get("/catalog")
@@ -58,7 +63,8 @@ def start_combat(
     db: DbSession,
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
-    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    user = _combat_user_or_401(db, refresh_token)
+    _require_combat_rate(f"combat-start:{user.id if user else 'local'}", limit=START_LIMIT)
     state = create_v4_battle(
         match_id=f"local_pve_{uuid4().hex}", user_id=user.id if user else None
     )
@@ -78,7 +84,7 @@ def list_active_combat(
     db: DbSession,
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
-    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    user = _combat_user_or_401(db, refresh_token)
     if user is None:
         return {"matches": []}
     expired_count = expire_stale_combat_matches(
@@ -138,6 +144,7 @@ async def submit_turn_plan(
     планирования с debounce. Просроченный ход — 409, результат придёт по WS.
     """
     state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
     human = human_players(state)[0]
     store_pending_plan(state, human.id, _build_intents(human.id, payload))
     _save_state_or_409(db, record, state)
@@ -157,6 +164,7 @@ async def set_turn_readiness(
     таймер-воркер/ленивый путь и разошлёт результат по WS.
     """
     state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
     human = human_players(state)[0]
     store_pending_plan(state, human.id, _build_intents(human.id, payload))
     set_player_ready(state, human.id, ready=payload.ready, now=datetime.now(UTC))
@@ -229,6 +237,7 @@ async def resolve_combat_turn(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     record = _get_authorized_record(db, payload.match_id, refresh_token)
+    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
     if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
         await match_channel_manager.broadcast_expired(payload.match_id)
         raise HTTPException(
@@ -246,7 +255,7 @@ async def resolve_combat_turn(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn deadline has passed",
         )
-    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    user = _combat_user_or_401(db, refresh_token)
 
     state = load_v4_battle(record)
     if state.status != MatchLifecycleStatus.PLANNING:
@@ -339,13 +348,32 @@ def _get_authorized_record(db: Session, match_id: str, refresh_token: str | None
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Combat match not found"
         )
-    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    user = _combat_user_or_401(db, refresh_token)
     if record.owner_user_id is not None and (user is None or record.owner_user_id != user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Combat match belongs to another user",
         )
     return record
+
+
+def _combat_user_or_401(db: Session, refresh_token: str | None):
+    """Внешний бой требует сессию; local сохраняет отдельный demo-путь."""
+    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    if get_settings().environment in EXTERNAL_ENVIRONMENTS and user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user
+
+
+def _require_combat_rate(key: str, *, limit: int) -> None:
+    # Локальные тесты/ручная отладка не должны делить глобальное in-memory окно.
+    if get_settings().environment not in EXTERNAL_ENVIRONMENTS:
+        return
+    if not allow_attempt(key, limit=limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts",
+        )
 
 
 def _expire_record_if_stale(db: Session, record) -> bool:

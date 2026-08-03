@@ -28,23 +28,25 @@ class AuthResponse(BaseModel):
 
 
 class PlacementRequest(BaseModel):
-    card_id: str
-    row: int
-    col: int
+    card_id: str = Field(min_length=1, max_length=64)
+    row: int = Field(ge=0, lt=5)
+    col: int = Field(ge=0, lt=5)
 
 
 class SpellRequest(BaseModel):
-    card_id: str
+    card_id: str = Field(min_length=1, max_length=64)
     # Точка применения; None — для заклинаний на всё поле (scope=board).
-    row: int | None = None
-    col: int | None = None
+    row: int | None = Field(default=None, ge=0, lt=5)
+    col: int | None = Field(default=None, ge=0, lt=5)
 
 
 class ResolveTurnRequest(BaseModel):
-    match_id: str
+    match_id: str = Field(min_length=1, max_length=96)
     turn: int = Field(ge=1)
-    placements: list[PlacementRequest] = Field(default_factory=list)
-    spells: list[SpellRequest] = Field(default_factory=list)
+    # Рука v4 ограничена шестью картами; больше намерений не может быть
+    # легальным и не должно доходить до доменного резолвера.
+    placements: list[PlacementRequest] = Field(default_factory=list, max_length=6)
+    spells: list[SpellRequest] = Field(default_factory=list, max_length=6)
 
 
 class ReadyTurnRequest(ResolveTurnRequest):
@@ -54,5 +56,5 @@ class ReadyTurnRequest(ResolveTurnRequest):
 
 
 class ClientEventRequest(BaseModel):
-    event: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    event: str = Field(min_length=1, max_length=64)
+    payload: dict[str, Any] = Field(default_factory=dict, max_length=24)

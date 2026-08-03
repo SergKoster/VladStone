@@ -670,13 +670,16 @@ COMBAT_REWORK §23.1.
    (`services/auth.py::verify_email_code` не считает попытки). Фикс: rate limit
    на verify + счётчик попыток на записи кода (3–5 неверных → код сгорает).
    **До production auth (Фаза 6, есть в ROADMAP).**
-9. **Анонимные боевые матчи** (CODEX-ревью, июль 2026): `POST /combat/start`
+9. **Анонимные боевые матчи — частично закрыто** (август 2026): `POST /combat/start`
    при отсутствии refresh-cookie создаёт матч с `owner_user_id=None`, а
    `_get_authorized_record`/WS (`ws.py:22`) пускают к матчам без владельца
    любого. Фронт показывает игру только после логина, но бэкенд это не
    enforcing — в проде можно анонимно плодить матчи и грузить таймер-воркер.
-   Фикс до публичного теста: требовать auth на реальных `/combat/*` и WS
-   (demo оставить отдельно), + rate limit на start/resolve. **До Фазы 6.**
+   В `production`/`staging` боевые HTTP/WS требуют refresh-cookie, а start и
+   turn actions ограничены по владельцу; `local` сохраняет явно изолированный
+   demo-путь для текущей разработки и старых тестов. Перед public release:
+   вынести demo в отдельный маршрут и заменить process-local limiter на
+   общий для инстансов. **До Фазы 6.**
 10. **Telemetry/dev-логи без границ** (CODEX-ревью, июль 2026):
     `POST /telemetry/client-events` без авторизации пишет произвольный payload
     в `.dev/` (нет лимита размера, rate limit, проверки окружения, allowlist
@@ -760,7 +763,7 @@ COMBAT_REWORK §23.1.
     bounded per-connection outbound queue + отдельный sender task, send-timeout,
     disconnect при переполнении/ошибке; HTTP/DB commit не ждёт медленного клиента;
     нагрузочный тест с не читающим WS-клиентом.
-20. **Нет лимитов на combat/WS input — High DoS до внешнего деплоя** (аудит
+20. **Нет лимитов на combat/WS input — частично закрыто** (август 2026):
     15 июля 2026): `ResolveTurnRequest.placements/spells` — списки без `max_length`,
     строки/координаты почти не ограничены; Caddy/FastAPI не задают общий body
     limit. WS принимает произвольный JSON без лимита сообщения. Это позволяет
@@ -768,7 +771,9 @@ COMBAT_REWORK §23.1.
     `/combat/start` (§8.9) доступно без аккаунта. **Фикс:** лимит request body на
     proxy/app, строгие Pydantic bounds (длина id, координаты, максимум intents
     не больше физического лимита руки), WS max message size и rate limit;
-    негативные API-тесты на 413/422/429.
+   Введены Pydantic bounds на id/координаты и максимум 6 placement/spell
+   intents, WS закрывает не-JSON и сообщения свыше 4 KiB. До public release
+   остаётся общий body-limit на proxy/app и интеграционные 413/429-тесты.
 21. **Google ID token декодируется без проверки подписи/срока — High auth**
     (аудит 15 июля 2026): `services/google_oauth.py` делает base64 decode payload
     и вручную проверяет только `aud`/`iss`; JWT signature, `exp`/`iat` и ключ

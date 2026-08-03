@@ -1,5 +1,8 @@
+import json
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.realtime.match_channels import match_channel_manager
 from app.services.auth import get_user_by_refresh_token
@@ -11,6 +14,8 @@ from app.services.combat_matches import (
 from app.services.combat_turn_timers import resolve_expired_planning_match
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
+MAX_WS_MESSAGE_BYTES = 4096
+EXTERNAL_ENVIRONMENTS = {"production", "staging"}
 
 
 @router.websocket("/matches/{match_id}")
@@ -23,6 +28,9 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
 
         refresh_token = websocket.cookies.get("refresh_token")
         user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+        if get_settings().environment in EXTERNAL_ENVIRONMENTS and user is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         if record.owner_user_id is not None and (user is None or record.owner_user_id != user.id):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
@@ -51,7 +59,15 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             ),
         )
         while True:
-            message = await websocket.receive_json()
+            incoming = await websocket.receive()
+            raw = incoming.get("text")
+            if raw is None or len(raw.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                return
+            message = json.loads(raw)
+            if not isinstance(message, dict):
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
             if message.get("type") == "ping":
                 await match_channel_manager.send_pong(websocket)
     except WebSocketDisconnect:
