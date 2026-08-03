@@ -188,3 +188,26 @@ def test_payload_hides_deck_and_opponent_hand() -> None:
     towers = [u for u in payload["units"] if u["is_tower"]]
     assert len(towers) == 10
     assert {u["row"] for u in towers} == {-1, 5}
+    assert len(payload["tower_slots"]) == 10
+    assert all(slot["status"] == "alive" for slot in payload["tower_slots"])
+
+
+def test_payload_keeps_destroyed_tower_slot_without_reviving_unit() -> None:
+    state = make_battle()
+    human = human_of(state)
+    destroyed = next(
+        unit for unit in towers_of_state(state, human.id) if unit.col == 2
+    )
+    state.units.remove(destroyed)
+
+    payload = v4_combat_response(state, viewer_id=human.id)["match"]
+    human_slots = [
+        slot for slot in payload["tower_slots"] if slot["owner_id"] == human.id
+    ]
+
+    assert [slot["col"] for slot in human_slots] == [0, 1, 2, 3, 4]
+    assert human_slots[2]["status"] == "destroyed"
+    assert human_slots[2]["current_hp"] == 0
+    assert all(
+        unit["id"] != destroyed.id for unit in payload["units"]
+    )  # UI-slot не воскрешает башню в движке

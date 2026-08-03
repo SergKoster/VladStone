@@ -6,6 +6,7 @@ import {
   type CombatMatch,
   type CombatResponse,
   type CombatStatusDefinition,
+  type CombatTowerSlot,
   type CombatUnit,
   type Placement,
   type SpellCast,
@@ -758,6 +759,10 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     );
   }
   const visibleMatch = renderedMatch ?? match;
+  const towerSlotsOf = (side: "top" | "bottom") =>
+    (visibleMatch.tower_slots ?? [])
+      .filter((slot) => slot.side === side)
+      .sort((a, b) => a.col - b.col);
   const currentPhaseLabel = phaseLabel(phaseEvent);
   const lungeByUnit = new Map(
     lunges.map((lunge) => [
@@ -824,6 +829,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         </div>
 
         <TowerRow
+          cols={cols}
           label="Башни врага"
           onTowerOpen={(tower, source) =>
             openDetail(
@@ -838,6 +844,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
               source,
             )
           }
+          slots={towerSlotsOf(enemy?.side ?? "top")}
           towers={towersOf(enemy?.side ?? "top")}
         />
 
@@ -1031,6 +1038,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         </div>
 
         <TowerRow
+          cols={cols}
           label="Твои башни"
           onTowerOpen={(tower, source) =>
             openDetail(
@@ -1045,6 +1053,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
               source,
             )
           }
+          slots={towerSlotsOf(viewer?.side ?? "bottom")}
           towers={towersOf(viewer?.side ?? "bottom")}
         />
 
@@ -1270,30 +1279,66 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
 }
 
 function TowerRow({
+  cols,
   label,
   onTowerOpen,
+  slots,
   towers,
 }: {
+  cols: number;
   label: string;
   onTowerOpen: (tower: CombatUnit, source: HTMLButtonElement) => void;
+  slots: CombatTowerSlot[];
   towers: CombatUnit[];
 }) {
+  const towerByCol = new Map(towers.map((tower) => [tower.col, tower]));
+  const slotByCol = new Map(slots.map((slot) => [slot.col, slot]));
+  // Старый waiting payload не рисует фальшивые руины. В активном матче даже
+  // payload старой версии докатывается до фиксированных колонок по живым units.
+  const columns = slots.length || towers.length
+    ? Array.from({ length: cols }, (_, col) => col)
+    : [];
+
   return (
     <div className="tower-row" aria-label={label}>
-      {towers.map((t) => (
-        <button
-          key={t.id}
-          aria-label={`Подробнее: башня, здоровье ${Math.max(0, t.current_hp)}`}
-          className={`tower${t.current_hp <= 0 ? " dead" : ""}`}
-          onClick={(event) => onTowerOpen(t, event.currentTarget)}
-          type="button"
-        >
-          <span className="tower-hp">{Math.max(0, t.current_hp)}</span>
-          <span className="tower-bar">
-            <span style={{ width: `${Math.max(0, (t.current_hp / t.max_hp) * 100)}%` }} />
-          </span>
-        </button>
-      ))}
+      {columns.map((col) => {
+        const tower = towerByCol.get(col);
+        const slot = slotByCol.get(col);
+        // Во время покадрового replay живая башня из текущего snapshot важнее
+        // финального manifest: серый слот появляется именно на кадре смерти.
+        const alive = Boolean(tower && tower.current_hp > 0);
+        return (
+          <div
+            key={`${slot?.owner_id ?? tower?.owner_id ?? label}:${col}`}
+            className={`tower-slot${alive ? "" : " destroyed"}`}
+            data-col={col}
+            data-status={alive ? "alive" : "destroyed"}
+          >
+            {alive && tower ? (
+              <button
+                aria-label={`Подробнее: башня линии ${col + 1}, здоровье ${tower.current_hp}`}
+                className="tower"
+                onClick={(event) => onTowerOpen(tower, event.currentTarget)}
+                type="button"
+              >
+                <span className="tower-hp">{tower.current_hp}</span>
+                <span className="tower-bar">
+                  <span style={{ width: `${Math.max(0, (tower.current_hp / tower.max_hp) * 100)}%` }} />
+                </span>
+              </button>
+            ) : (
+              <div
+                aria-label={`Разрушенная башня линии ${col + 1}, здоровье 0`}
+                className="tower dead"
+                role="img"
+              >
+                <span className="tower-hp">0</span>
+                <span className="tower-bar"><span style={{ width: "0%" }} /></span>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

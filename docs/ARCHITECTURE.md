@@ -144,7 +144,10 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
 - `domain/combat/engine/payload.py`: сериализация v4-матча наружу, **payload
   viewer-специфичен** (`viewer_id` в ответе): колода игрока не сериализуется
   никогда (только `deck_count`), рука уходит только её владельцу (остальным —
-  пустой список + `hand_count`), `user_id` наружу не отдаётся.
+  пустой список + `hand_count`), `user_id` наружу не отдаётся. Отдельный
+  server-authoritative `tower_slots` сохраняет по пять постоянных колонок на
+  сторону (`alive|destroyed`, HP, id/blueprint): погибшая башня удалена из
+  `units` и винкона, но reconnect не сдвигает визуальные линии (§23.10).
 - `services/rewards.py`: идемпотентная выдача награды (unique user+match).
 - `services/dev_logging.py`: JSONL-логи в `.dev/` для отладки боёв.
 

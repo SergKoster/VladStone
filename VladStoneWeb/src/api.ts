@@ -52,6 +52,18 @@ export type CombatUnit = {
   remaining_attacks: number;
 };
 
+/** Постоянный слот башни линии; уничтоженная башня не возвращается в units. */
+export type CombatTowerSlot = {
+  owner_id: string;
+  side: "top" | "bottom";
+  col: number;
+  status: "alive" | "destroyed";
+  tower_id: string;
+  blueprint_id: string;
+  current_hp: number;
+  max_hp: number;
+};
+
 /** Карта каталога боя v4 (/combat/catalog): арт, статы, покрытия, зона спавна. */
 export type CombatCatalogCard = {
   id: string;
@@ -206,6 +218,8 @@ export type CombatMatch = {
   /** Which seat this payload was serialized for (the client's own player). */
   viewer_id: string | null;
   units: CombatUnit[];
+  /** Server-authoritative проекция пяти линий, включая разрушенные башни. */
+  tower_slots: CombatTowerSlot[];
   log: Array<{ message: string }>;
   events: CombatEvent[];
   result: {

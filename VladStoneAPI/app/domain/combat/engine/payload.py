@@ -12,6 +12,7 @@ from app.domain.combat.engine.content import BLUEPRINTS, CARDS, V4_COLS, V4_ROWS
 from app.domain.combat.engine.stances import Stance
 from app.domain.combat.engine.statuses import all_status_specs
 from app.domain.combat.engine.tags import TAG_TOWER
+from app.domain.combat.engine.towers import TOWER_BLUEPRINT_ID, TOWER_HP
 from app.domain.combat.engine.translate import translate_engine_events
 from app.domain.combat.engine.units import (
     current_stance,
@@ -20,6 +21,7 @@ from app.domain.combat.engine.units import (
     unit_tags,
 )
 from app.domain.combat.helpers import human_players
+from app.domain.combat.models import MatchLifecycleStatus
 from app.domain.combat.timing import turn_duration_seconds
 
 
@@ -51,6 +53,46 @@ def _unit_payload(unit, blueprint) -> dict:
         "remaining_steps": unit.remaining_steps,
         "remaining_attacks": unit.remaining_attacks,
     }
+
+
+def _tower_slots_payload(state: BattleStateV4, ctx) -> list[dict]:
+    """Постоянные UI-слоты башен, включая уже уничтоженные (§23.10).
+
+    Погибшие башни не возвращаются в ``state.units``: manifest лишь сохраняет
+    server-authoritative соответствие колонок для reconnect и финального кадра.
+    """
+    if state.status == MatchLifecycleStatus.WAITING_FOR_OPPONENT:
+        return []
+
+    slots = []
+    for player in state.players:
+        living_by_col = {
+            unit.col: unit
+            for unit in state.units
+            if unit.owner_id == player.id
+            and TAG_TOWER in ctx.blueprint_of(unit).tags
+        }
+        for col in range(state.cols):
+            tower = living_by_col.get(col)
+            slots.append(
+                {
+                    "owner_id": player.id,
+                    "side": player.side.value,
+                    "col": col,
+                    "status": "alive" if tower else "destroyed",
+                    "tower_id": tower.id if tower else f"{player.id}_tower_{col}",
+                    "blueprint_id": (
+                        tower.blueprint_id if tower else TOWER_BLUEPRINT_ID
+                    ),
+                    "current_hp": max(0, tower.current_hp) if tower else 0,
+                    "max_hp": (
+                        effective_stats(tower, ctx.blueprint_of(tower)).hp
+                        if tower
+                        else TOWER_HP
+                    ),
+                }
+            )
+    return slots
 
 
 def _pattern_cells(pattern) -> list[dict]:
@@ -160,6 +202,7 @@ def v4_combat_response(
         "players": players_payload,
         "viewer_id": viewer_id,
         "units": [_unit_payload(unit, ctx.blueprint_of(unit)) for unit in state.units],
+        "tower_slots": _tower_slots_payload(state, ctx),
         "log": [{"message": entry.message} for entry in state.log],
         "result": state.result.model_dump(mode="json"),
     }

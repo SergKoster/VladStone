@@ -2417,13 +2417,18 @@ nav {
 
 .tower-row {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr));
   gap: 5px;
+}
+
+.tower-slot {
+  min-width: 0;
 }
 
 .tower {
   display: grid;
+  box-sizing: border-box;
+  width: 100%;
   gap: 2px;
   padding: 3px 4px;
   border: 1px solid #b9c8bf;
@@ -2440,6 +2445,8 @@ nav {
 }
 .tower.dead {
   opacity: 0.35;
+  cursor: default;
+  filter: grayscale(1);
 }
 .tower-hp {
   font-size: 0.74rem;
