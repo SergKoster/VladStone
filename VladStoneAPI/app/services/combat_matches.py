@@ -52,6 +52,10 @@ class SqlAlchemyCombatMatchStore:
             winner_id=match.result.winner_id,
         )
         self.db.add(record)
+        # ``CombatMatchParticipant.match_id`` is a scalar FK rather than an ORM
+        # relationship.  Flush the parent explicitly so PostgreSQL never tries
+        # to insert a seat before its match record during the transaction.
+        self.db.flush()
         for player in match.players:
             if player.user_id is not None:
                 self.db.add(
