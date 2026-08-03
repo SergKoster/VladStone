@@ -12,6 +12,7 @@ import {
   getCollection,
   getCombatCatalog,
   getMe,
+  createMatchInvite,
   googleDevLogin,
   googleLoginUrl,
   logout,
@@ -22,6 +23,7 @@ import { AuthScreen } from "./features/auth/AuthScreen";
 import { BattleV4 } from "./features/battle/BattleV4";
 import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
+import { CreatedInviteLobby, JoinInvite, PENDING_INVITE_ROUTE_KEY } from "./features/invite/InviteLobby";
 import { Profile } from "./features/profile/Profile";
 import { t } from "./i18n";
 import { useHashRoute } from "./shared/routing";
@@ -34,6 +36,7 @@ function App() {
   const [devCode, setDevCode] = React.useState<string | null>(null);
   const [authUser, setAuthUser] = React.useState<AuthUser | null>(null);
   const [authMessage, setAuthMessage] = React.useState("");
+  const [inviteMessage, setInviteMessage] = React.useState("");
   const [sessionChecked, setSessionChecked] = React.useState(false);
   const [providers, setProviders] = React.useState<AuthProviders | null>(null);
 
@@ -59,6 +62,13 @@ function App() {
       );
     }
   }, []);
+  React.useEffect(() => {
+    if (!authUser) return;
+    const pendingRoute = window.sessionStorage.getItem(PENDING_INVITE_ROUTE_KEY);
+    if (pendingRoute && window.location.hash !== pendingRoute) {
+      window.location.hash = pendingRoute;
+    }
+  }, [authUser]);
   const profileState = useServerResource(
     () => (authUser ? getMe() : Promise.resolve(null)),
     [authUser?.id],
@@ -107,6 +117,9 @@ function App() {
 
   async function handleGoogleLogin() {
     if (providers?.google) {
+      if (route.page === "invite") {
+        window.sessionStorage.setItem(PENDING_INVITE_ROUTE_KEY, window.location.hash);
+      }
       // Real OAuth: leave the app entirely; we come back with the cookie set.
       window.location.href = googleLoginUrl();
       return;
@@ -129,6 +142,17 @@ function App() {
     setCode("");
     setDevCode(null);
     setRoute("dashboard");
+  }
+
+  async function handleCreateInvite() {
+    setInviteMessage("");
+    try {
+      const response = await createMatchInvite();
+      window.sessionStorage.setItem(`vladstone.invite.${response.match.id}`, response.invite.share_path);
+      setRoute({ page: "lobby", matchId: response.match.id });
+    } catch {
+      setInviteMessage("Не удалось создать приглашение. Попробуй ещё раз.");
+    }
   }
 
   if (!sessionChecked) {
@@ -163,16 +187,16 @@ function App() {
           <p className="muted">MVP dev build</p>
         </div>
         <nav>
-          <NavButton active={route === "dashboard"} onClick={() => setRoute("dashboard")}>
+          <NavButton active={route.page === "dashboard"} onClick={() => setRoute("dashboard")}>
             {t.dashboard}
           </NavButton>
-          <NavButton active={route === "collection"} onClick={() => setRoute("collection")}>
+          <NavButton active={route.page === "collection"} onClick={() => setRoute("collection")}>
             {t.collection}
           </NavButton>
-          <NavButton active={route === "battle"} onClick={() => setRoute("battle")}>
+          <NavButton active={route.page === "battle"} onClick={() => setRoute("battle")}>
             {t.battle}
           </NavButton>
-          <NavButton active={route === "profile"} onClick={() => setRoute("profile")}>
+          <NavButton active={route.page === "profile"} onClick={() => setRoute("profile")}>
             {t.profile}
           </NavButton>
         </nav>
@@ -182,28 +206,46 @@ function App() {
       </aside>
       {/* U2: у маршрута боя свой layout-модификатор — широкий экран отдан бою,
           остальные страницы сохраняют прежнюю ширину (.page). */}
-      <section className={route === "battle" ? "content content-battle" : "content"}>
-        {route === "dashboard" && (
+      <section className={route.page === "battle" ? "content content-battle" : "content"}>
+        {route.page === "dashboard" && (
           <Dashboard
             coins={profile?.coins ?? 0}
             collectionCount={new Set(collection.map((card) => card.id)).size}
+            onInvite={() => void handleCreateInvite()}
             onPlay={() => setRoute("battle")}
+            message={inviteMessage}
           />
         )}
-        {route === "collection" && (
+        {route.page === "collection" && (
           <Collection
             cards={collection}
             catalog={catalog}
           />
         )}
-        {route === "battle" && (
+        {route.page === "battle" && (
           <BattleV4
+            key={route.matchId ?? "active-or-pve"}
             cards={catalog}
+            initialMatchId={route.matchId}
             statuses={statusCatalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
         )}
-        {route === "profile" && (
+        {route.page === "lobby" && (
+          <CreatedInviteLobby
+            matchId={route.matchId}
+            onBack={() => setRoute("dashboard")}
+            onStarted={() => setRoute({ page: "battle", matchId: route.matchId })}
+          />
+        )}
+        {route.page === "invite" && (
+          <JoinInvite
+            token={route.token}
+            onBack={() => setRoute("dashboard")}
+            onJoined={(matchId) => setRoute({ page: "battle", matchId })}
+          />
+        )}
+        {route.page === "profile" && (
           <Profile
             createdAt={profile?.created_at}
             email={profile?.email ?? authUser.email}

@@ -42,6 +42,8 @@ import { useTurnPlayback } from "./useTurnPlayback";
 type Props = {
   cards: CombatCatalogCard[];
   statuses: CombatStatusDefinition[];
+  /** Deep link target; avoids restoring an unrelated active PvE match. */
+  initialMatchId?: string;
   onBattleFinished: () => void;
 };
 
@@ -83,7 +85,7 @@ type CombatDetail = {
   unit?: CombatUnit;
 };
 
-export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
+export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const statusCatalog = React.useMemo(
     () => new Map(statuses.map((status) => [status.id, status])),
@@ -242,11 +244,14 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     }
     matchRef.current = nextMatch;
     setMatch(nextMatch);
+    const viewer = nextMatch.players.find((player) => player.id === nextMatch.viewer_id);
+    setIsReady(Boolean(viewer?.ready && nextMatch.status === "planning"));
   }, []);
 
   const renderedMatch = isAnimating && animatedMatch ? animatedMatch : match;
   const viewer = renderedMatch?.players.find((p) => p.id === renderedMatch.viewer_id) ?? null;
   const enemy = renderedMatch?.players.find((p) => viewer && p.team !== viewer.team) ?? null;
+  const opponentReady = Boolean(enemy?.ready);
   const rows = renderedMatch?.rows ?? 5;
   const cols = renderedMatch?.cols ?? 5;
   const isFinished =
@@ -420,6 +425,10 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   React.useEffect(() => {
     if (match || activeMatchRestoreAttemptedRef.current) return;
     activeMatchRestoreAttemptedRef.current = true;
+    if (initialMatchId) {
+      void getCombat(initialMatchId).then(queueResolution).catch(() => undefined);
+      return;
+    }
     void getActiveCombats()
       .then((payload) => payload.matches[0])
       .then((active) => {
@@ -430,7 +439,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
         if (payload && !matchRef.current) queueResolution(payload);
       })
       .catch(() => undefined);
-  }, [match, queueResolution]);
+  }, [initialMatchId, match, queueResolution]);
 
   // --- realtime: server-pushed updates. V3: клиент сам ход НЕ резолвит —
   // любой результат (ранний по готовности или дедлайн) приходит сюда. ---
@@ -1181,7 +1190,11 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
           {busy ? "..." : isReady ? "Отменить готовность" : "Готов"}
         </button>
         {isReady ? (
-          <p className="ready-hint">Готово — соперник отвечает…</p>
+          <p className="ready-hint">
+            {enemy?.is_bot || opponentReady ? "Готово — ход скоро начнётся" : "Готово — ждём соперника"}
+          </p>
+        ) : opponentReady ? (
+          <p className="ready-hint">Соперник готов — закончи план или дождись таймера</p>
         ) : null}
 
         {/* V8: журнал розыгрышей обеих сторон (серверный match.log в v4 пуст).

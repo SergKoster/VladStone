@@ -116,9 +116,9 @@
 > Definition of Done — [PVP_INVITE_PLAN.md](PVP_INVITE_PLAN.md).
 
 - [ ] **NEXT — Invite flow:** backend уже создаёт waiting-lobby, одноразовый
-      token, второй seat, multi-human resolve и viewer-safe WS (август 2026);
-      осталось подключить browser deep link/lobby UX, reconnect-resume и провести
-      первый общий ход на двух клиентах.
+      token, второй seat, multi-human resolve и viewer-safe WS; frontend уже
+      даёт hash deep-link, copy/cancel lobby и точный restore матча (август
+      2026). Осталось reconnect-resume и первый общий ход на двух клиентах.
 - [ ] Синхронизация планирования двух клиентов (готов/таймер, ранний резолв).
 - [x] Блокировка/версионирование записи матча — фикс гонки резолва (ARCH §8.6):
       оптимистическая версия, миграция 0002 (июль 2026).

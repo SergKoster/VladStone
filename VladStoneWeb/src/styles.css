@@ -2638,6 +2638,48 @@ nav {
   text-align: center;
 }
 
+.dashboard-actions,
+.invite-actions,
+.invite-link-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.invite-page {
+  max-width: 680px;
+}
+
+.invite-page h1 {
+  margin: 4px 0 8px;
+}
+
+.invite-link-row {
+  margin: 20px 0 10px;
+}
+
+.invite-link-row input {
+  flex: 1 1 360px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #cbd7cf;
+  border-radius: 9px;
+  background: #fff;
+  color: #33433b;
+}
+
+.invite-meta,
+.invite-warning,
+.dashboard-message {
+  color: #6b7d75;
+  font-size: 0.9rem;
+}
+
+.invite-warning {
+  margin: 18px 0;
+}
+
 .battle-log {
   list-style: none;
   margin: 0;

@@ -179,7 +179,7 @@ export type CombatEventSnapshot = {
 export type CombatMatch = {
   id: string;
   ruleset_version: number;
-  status: "planning" | "resolving" | "finished" | "expired";
+  status: "waiting_for_opponent" | "planning" | "resolving" | "finished" | "expired";
   turn: number;
   rows: number;
   cols: number;
@@ -195,6 +195,8 @@ export type CombatMatch = {
     team: number;
     is_bot: boolean;
     mana: number;
+    /** Public confirmation state; the actual plan remains private. */
+    ready: boolean;
     /** Server-authoritative hand — populated only for the viewer's own seat. */
     hand: string[];
     hand_count: number;
@@ -222,6 +224,16 @@ export type CombatResponse = {
   resolved_turn: number | null;
   /** Последняя sequence полной ленты; часть ключа дедупликации HTTP/WS. */
   last_sequence: number | null;
+};
+
+export type MatchInviteResponse = {
+  match: CombatMatch;
+  invite: { share_path: string; expires_at: string; status: string };
+};
+
+export type MatchLobbyResponse = {
+  match: CombatMatch;
+  invite: { expires_at: string; status: string };
 };
 
 export type MatchSocketMessage =
@@ -309,6 +321,25 @@ export function getCombat(matchId: string) {
 
 export function getActiveCombats() {
   return request<{ matches: CombatMatch[] }>("/combat/active");
+}
+
+export function createMatchInvite() {
+  return request<MatchInviteResponse>("/matches/invite", { method: "POST" });
+}
+
+export function joinMatchInvite(token: string) {
+  return request<CombatResponse>("/matches/join", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function getMatchLobby(matchId: string) {
+  return request<MatchLobbyResponse>(`/matches/${matchId}/lobby`);
+}
+
+export function cancelMatchInvite(matchId: string) {
+  return request<void>(`/matches/${matchId}/invite`, { method: "DELETE" });
 }
 
 // V3: интент-стриминг — сервер хранит последний план и применит его на

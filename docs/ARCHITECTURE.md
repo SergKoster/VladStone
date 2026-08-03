@@ -503,8 +503,9 @@ payload матча (уже так, `MatchState.rows/cols`); **клиент ст�
 seat и запускает v4-матч. `GET /matches/{id}/lobby` и cancel-route обслуживают
 ожидание. Auth `/combat`, active-list, таймер и WS привязаны к participant,
 а не единственному owner; каждое WS-соединение хранит свой `viewer_id` и
-получает отдельный payload. Frontend lobby/deep link и reconnect-resume всё ещё
-следуют по PVP-5/PVP-6.
+получает отдельный payload. Frontend PVP-5 тоже готов: hash-routes
+`invite/<token>`, `lobby/<match_id>` и `battle/<match_id>`, login round-trip,
+copy/cancel lobby и точный battle restore. Остался reconnect-resume PVP-6.
 
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
@@ -542,10 +543,10 @@ COMBAT_REWORK §23.1.
 Осталось для PvP (целевое состояние):
 - Планирование: backend собирает plans всех людей к дедлайну; pure PvP
   резолвится сразу при полном наборе confirm (bot-delay остаётся только PvE).
-  Frontend ещё должен показать публичную ready-индикацию соперника.
-- Invite flow backend: `POST /matches/invite` → токен/ссылка →
+  Frontend показывает публичную ready-индикацию соперника без раскрытия плана.
+- Invite flow: `POST /matches/invite` → token/hash-link →
   `POST /matches/join`; матч в `waiting_for_opponent` до присоединения.
-  Не реализованы браузерный deep link и экран lobby (PVP-5).
+  Browser deep link и экран lobby реализованы (PVP-5).
 - Reconnect: WS-снапшот при подключении + `/combat/active`. **Контракт
   дозагрузки посреди хода** (закрывает риск §8.15): сервер отдаёт снапшот
   *начала последнего хода* + список combat-событий этого хода +

@@ -1,7 +1,7 @@
 # PvP invite — план реализации
 
-> **Статус:** в работе (3 августа 2026). Backend vertical slice PVP-1–PVP-4
-> реализован; следующий срез — frontend deep-link/lobby UX и reconnect hardening.
+> **Статус:** в работе (3 августа 2026). Backend PVP-1–PVP-4 и frontend
+> deep-link/lobby UX PVP-5 реализованы; следующий срез — reconnect hardening.
 > Цель этапа — довести существующий бой v4 до первого стабильного матча двух
 > авторизованных игроков по ссылке-приглашению. Канон продукта: [DESIGN.md](DESIGN.md)
 > §6.1–§6.2; место в релизе: [ROADMAP.md](ROADMAP.md), Фаза 4; целевая
