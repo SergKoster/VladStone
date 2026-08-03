@@ -254,6 +254,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const opponentReady = Boolean(enemy?.ready);
   const rows = renderedMatch?.rows ?? 5;
   const cols = renderedMatch?.cols ?? 5;
+  // Server coordinates stay canonical for both players.  The TOP viewer sees
+  // rows mirrored so their own edge is at the bottom; columns remain absolute
+  // by design (COMBAT_REWORK H7), so left/right never swap.
+  const rowForViewer = (serverRow: number): number =>
+    viewer?.side === "top" ? rows - 1 - serverRow : serverRow;
   const isFinished =
     renderedMatch?.result.status === "finished" || renderedMatch?.result.status === "expired";
 
@@ -754,7 +759,12 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   }
   const visibleMatch = renderedMatch ?? match;
   const currentPhaseLabel = phaseLabel(phaseEvent);
-  const lungeByUnit = new Map(lunges.map((lunge) => [lunge.unitId, lunge]));
+  const lungeByUnit = new Map(
+    lunges.map((lunge) => [
+      lunge.unitId,
+      viewer?.side === "top" ? { ...lunge, dy: -lunge.dy } : lunge,
+    ]),
+  );
   // V7: подсветка `.ok` на клетках прячется под токенами — юниты-цели
   // выбранного заклинания подсвечиваются на самих токенах.
   const selectedSpell = (() => {
@@ -838,7 +848,8 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         <div className="board-v4-wrap">
           <div className="board-v4">
             {Array.from({ length: rows * cols }, (_, i) => {
-              const row = Math.floor(i / cols);
+              const displayRow = Math.floor(i / cols);
+              const row = rowForViewer(displayRow);
               const col = i % cols;
               const unit = unitAt(row, col);
               const plan = plannedAt(row, col);
@@ -879,7 +890,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
             }
           >
             {cellPulses.map((pulse) => (
-              <CellPulseView key={pulse.key} pulse={pulse} />
+              <CellPulseView
+                key={pulse.key}
+                displayRow={rowForViewer(pulse.row)}
+                pulse={pulse}
+              />
             ))}
             {visibleUnits.map((unit) => (
               <UnitToken
@@ -888,6 +903,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                 catalog={catalog}
                 dying={dyingIds.includes(unit.id)}
                 lunge={lungeByUnit.get(unit.id)}
+                displayRow={rowForViewer(unit.row)}
                 spawning={spawningIds.includes(unit.id)}
                 inspected={inspected?.unitId === unit.id}
                 onInspectorBlur={() => scheduleInspectorClose(unit.id)}
@@ -937,7 +953,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                   style={
                     {
                       ["--col" as string]: plan.col,
-                      ["--row" as string]: plan.row,
+                      ["--row" as string]: rowForViewer(plan.row),
                     } as React.CSSProperties
                   }
                 >
@@ -961,7 +977,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                 style={
                   {
                     ["--col" as string]: cast.col,
-                    ["--row" as string]: cast.row,
+                    ["--row" as string]: rowForViewer(cast.row),
                     ["--spell-cast-ms" as string]: `${SPELL_CAST_MS}ms`,
                   } as React.CSSProperties
                 }
@@ -983,7 +999,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                 style={
                   {
                     ["--col" as string]: logHighlight.col,
-                    ["--row" as string]: logHighlight.row,
+                    ["--row" as string]: rowForViewer(logHighlight.row),
                   } as React.CSSProperties
                 }
               />
@@ -992,6 +1008,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
               <DamagePopupView
                 key={popup.key}
                 popup={popup}
+                displayRow={rowForViewer(popup.row)}
                 statusLabel={
                   popup.kind === "status"
                     ? statusCatalog.get(popup.statusId ?? "")?.name ?? popup.statusId
@@ -1317,6 +1334,7 @@ function UnitToken({
   acting,
   unit,
   catalog,
+  displayRow,
   dying,
   inspected,
   lunge,
@@ -1335,6 +1353,7 @@ function UnitToken({
   acting: boolean;
   unit: CombatUnit;
   catalog: Map<string, CombatCatalogCard>;
+  displayRow: number;
   dying: boolean;
   inspected: boolean;
   lunge?: LungeEffect;
@@ -1378,7 +1397,7 @@ function UnitToken({
       style={
         {
           ["--col" as string]: unit.col,
-          ["--row" as string]: unit.row,
+          ["--row" as string]: displayRow,
         } as React.CSSProperties
       }
     >
@@ -1621,14 +1640,16 @@ function unitWaitLabel(reason: NonNullable<CombatEvent["wait_reason"]>) {
 
 function DamagePopupView({
   popup,
+  displayRow,
   statusLabel,
 }: {
   popup: BattlePopup;
+  displayRow: number;
   statusLabel?: string;
 }) {
   const positionStyle = {
     ["--col" as string]: popup.col,
-    ["--row" as string]: popup.row,
+    ["--row" as string]: displayRow,
   } as React.CSSProperties;
   if (popup.kind === "status") {
     // V9: наложение статуса всплывает над целью текстом («Яд +3»).
@@ -1652,7 +1673,7 @@ function DamagePopupView({
   );
 }
 
-function CellPulseView({ pulse }: { pulse: CellPulse }) {
+function CellPulseView({ pulse, displayRow }: { pulse: CellPulse; displayRow: number }) {
   return (
     <span
       aria-hidden="true"
@@ -1660,7 +1681,7 @@ function CellPulseView({ pulse }: { pulse: CellPulse }) {
       style={
         {
           ["--col" as string]: pulse.col,
-          ["--row" as string]: pulse.row,
+          ["--row" as string]: displayRow,
         } as React.CSSProperties
       }
     />
