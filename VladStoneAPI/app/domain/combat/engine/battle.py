@@ -83,7 +83,11 @@ class BattleStateV4(BaseModel):
     ready_since: datetime | None = None
 
 
-def build_context(state: BattleStateV4) -> EffectContext:
+def build_context(
+    state: BattleStateV4,
+    *,
+    rng: random.Random | None = None,
+) -> EffectContext:
     """Собрать рантайм-контекст из персистентного состояния + статичный контент.
 
     Контент (чертежи/карты/спеллы) не хранится в матче — подхватывается из
@@ -99,6 +103,7 @@ def build_context(state: BattleStateV4) -> EffectContext:
         cards=dict(CARDS),
         spells=dict(SPELLS),
         deck_card_ids=tuple(DECK_CARD_IDS_V4),
+        rng=rng,
         mana_cap=state.mana_cap,
         token_seq=state.token_seq,
     )
@@ -181,6 +186,7 @@ def resolve_v4_turn(
     *,
     human_intents: PlayerIntents,
     now: datetime | None = None,
+    rng: random.Random | None = None,
 ) -> list[EngineEvent]:
     """Разыграть ход: намерения человека + боты, резолвер, винкон/суд, таймер.
 
@@ -189,7 +195,7 @@ def resolve_v4_turn(
     """
     checked_at = _as_utc(now or datetime.now(UTC))
     resolved_turn = state.turn
-    ctx = build_context(state)
+    ctx = build_context(state, rng=rng)
     intents = [human_intents]
     for player in state.players:
         if player.is_bot:

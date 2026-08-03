@@ -11,6 +11,7 @@
   клиентских combat-событий (P2.12).
 """
 
+import random
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -139,6 +140,9 @@ class EffectContext:
     # Live v4 передаёт свой decklist; None сохраняет no-op для изолированных
     # тестовых/скриптовых контекстов без deck-cycle.
     deck_card_ids: tuple[str, ...] | None = None
+    # Simulation/replay могут передать свой RNG для воспроизводимой пересборки
+    # колоды; live-матч по-прежнему использует системный генератор.
+    rng: random.Random | None = None
     mana_cap: int = 10
     # Счётчик токенов матча — детерминированные id призванных юнитов.
     token_seq: int = 0
@@ -635,7 +639,7 @@ def _draw_card(effect: DrawCard, ctx: EffectContext, *, caster_id: str) -> list[
             # Кэп руки (E3): полная рука — добор пропущен, карта не сгорает.
             if len(player.hand) >= HAND_CAP:
                 break
-            if draw_v4_card(player, card_ids=ctx.deck_card_ids) is None:
+            if draw_v4_card(player, card_ids=ctx.deck_card_ids, rng=ctx.rng) is None:
                 break
             events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
     return events

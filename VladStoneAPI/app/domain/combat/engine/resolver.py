@@ -687,7 +687,7 @@ def _draw_and_mana(
     events: list[EngineEvent] = []
     for player in ctx.players:
         if len(player.hand) < HAND_CAP:
-            if draw_v4_card(player, card_ids=ctx.deck_card_ids) is not None:
+            if draw_v4_card(player, card_ids=ctx.deck_card_ids, rng=ctx.rng) is not None:
                 events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
         before = player.mana
         player.mana = min(ctx.mana_cap, player.mana + mana_gain(turn + 1))
