@@ -9,6 +9,7 @@ import {
   type CombatUnit,
   type Placement,
   type SpellCast,
+  getActiveCombats,
   getCombat,
   planCombat,
   readyCombat,
@@ -132,6 +133,12 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
   } | null>(null);
   const autoReadyDeadline = React.useRef<string | null>(null);
   const realtimePlaybackKeyRef = React.useRef<string | null>(null);
+  const processedPlaybackKeysRef = React.useRef(new Set<string>());
+  const responseQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const consumeResolutionRef = React.useRef<(payload: CombatResponse) => Promise<void>>(
+    async () => undefined,
+  );
+  const activeMatchRestoreAttemptedRef = React.useRef(false);
   const inspectorCloseTimerRef = React.useRef<number | null>(null);
   const inspectedTokenRef = React.useRef<HTMLElement | null>(null);
   const lastInspectorPointerTypeRef = React.useRef<string | null>(null);
@@ -356,61 +363,100 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
     [],
   );
 
-  // --- realtime: server-pushed updates. V3: клиент сам ход НЕ резолвит —
-  // любой результат (ранний по готовности или дедлайн) приходит сюда. ---
-  React.useEffect(() => {
-    if (!match) return undefined;
+  // Один последовательный consumer для WS и HTTP. Пока проигрывается один
+  // завершённый ход, следующий envelope ждёт в очереди, а не теряется из-за
+  // результата `busy` у проигрывателя.
+  const consumeResolution = React.useCallback(async (payload: CombatResponse) => {
     const clearPlans = () => {
       setPlanned([]);
       setSelected(null);
       setIsReady(false); // V3: новый ход — готовность снята
     };
-    const consumeResolution = (payload: CombatResponse) => {
-      const preMatch = matchRef.current;
-      if (!preMatch) {
-        commitMatch(payload.match);
-        clearPlans();
-        return;
-      }
+    const preMatch = matchRef.current;
+    if (!preMatch || payload.match.id !== preMatch.id) {
+      commitMatch(payload.match);
       clearPlans();
+      return;
+    }
 
-      const advanced =
-        payload.match.turn > preMatch.turn || payload.match.status !== preMatch.status;
-      if (!advanced || payload.events.length === 0) {
-        // Eventless snapshot допустим для первичного connect, но не является
-        // источником реплея завершённого хода.
-        commitMatch(payload.match);
-        return;
+    const advanced =
+      payload.match.turn > preMatch.turn || payload.match.status !== preMatch.status;
+    if (!advanced || payload.events.length === 0) {
+      // Повторный WS-snapshot того же хода не должен стирать намерения игрока.
+      if (payload.match.turn >= preMatch.turn) commitMatch(payload.match);
+      return;
+    }
+
+    clearPlans();
+    recordPlays(payload); // V8: журнал розыгрышей (свой дедуп по ходу)
+    const playbackKey = responsePlaybackKey(payload);
+    if (processedPlaybackKeysRef.current.has(playbackKey)) return;
+    processedPlaybackKeysRef.current.add(playbackKey);
+    realtimePlaybackKeyRef.current = playbackKey;
+    try {
+      const result = await playTurn(preMatch, payload.events, payload.match, playbackKey);
+      if (result !== "busy") commitMatch(payload.match);
+      // V3: финал матча тоже приходит этим путём (клиент сам не резолвит).
+      if (payload.match.result.status !== "active") onBattleFinished();
+    } catch {
+      commitMatch(payload.match);
+    } finally {
+      if (realtimePlaybackKeyRef.current === playbackKey) {
+        realtimePlaybackKeyRef.current = null;
       }
+    }
+  }, [commitMatch, onBattleFinished, playTurn, recordPlays]);
+  consumeResolutionRef.current = consumeResolution;
 
-      recordPlays(payload); // V8: журнал розыгрышей (свой дедуп по ходу)
-      const playbackKey = responsePlaybackKey(payload);
-      if (realtimePlaybackKeyRef.current === playbackKey) return;
-      realtimePlaybackKeyRef.current = playbackKey;
-      void playTurn(preMatch, payload.events, payload.match, playbackKey)
-        .then((result) => {
-          if (result !== "busy") commitMatch(payload.match);
-          // V3: финал матча тоже приходит этим путём (клиент сам не резолвит).
-          if (payload.match.result.status !== "active") onBattleFinished();
-        })
-        .catch(() => commitMatch(payload.match))
-        .finally(() => {
-          if (realtimePlaybackKeyRef.current === playbackKey) {
-            realtimePlaybackKeyRef.current = null;
-          }
-        });
-    };
-    const applySnapshot = (payload: CombatResponse) => consumeResolution(payload);
-    const applyUpdate = (payload: CombatResponse) => consumeResolution(payload);
+  const queueResolution = React.useCallback((payload: CombatResponse) => {
+    responseQueueRef.current = responseQueueRef.current
+      .catch(() => undefined)
+      .then(() => consumeResolutionRef.current(payload));
+  }, []);
+
+  // Восстановление на reload/возврате на вкладку: сервер остаётся источником
+  // состояния, поэтому сначала ищем только свой активный матч, затем загружаем
+  // его полный envelope (с replay, если ход уже дорезолвлен).
+  React.useEffect(() => {
+    if (match || activeMatchRestoreAttemptedRef.current) return;
+    activeMatchRestoreAttemptedRef.current = true;
+    void getActiveCombats()
+      .then((payload) => payload.matches[0])
+      .then((active) => {
+        if (!active || matchRef.current) return null;
+        return getCombat(active.id);
+      })
+      .then((payload) => {
+        if (payload && !matchRef.current) queueResolution(payload);
+      })
+      .catch(() => undefined);
+  }, [match, queueResolution]);
+
+  // --- realtime: server-pushed updates. V3: клиент сам ход НЕ резолвит —
+  // любой результат (ранний по готовности или дедлайн) приходит сюда. ---
+  React.useEffect(() => {
+    if (!match) return undefined;
     const disconnect = connectMatchRealtime({
       matchId: match.id,
-      onSnapshot: applySnapshot,
-      onUpdate: applyUpdate,
+      onSnapshot: queueResolution,
+      onUpdate: queueResolution,
       onStatus: setRealtime,
     });
     return disconnect;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match?.id]);
+
+  // WS ускоряет обновления, но не является единственным путём корректности:
+  // при reconnect/error забираем состояние HTTP, пока сокет не подтвердит open.
+  React.useEffect(() => {
+    if (!match || realtime === "Realtime подключен") return undefined;
+    const refresh = () => {
+      void getCombat(match.id).then(queueResolution).catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 2500);
+    return () => window.clearInterval(timer);
+  }, [match?.id, queueResolution, realtime]);
 
   // --- turn countdown from the server planning deadline ---
   // Длительность хода — серверная (эндшпиль сжимает её с 15-го хода,
@@ -513,6 +559,8 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       setPlayLog([]);
       setLogHighlight(null);
       playLogTurnsRef.current.clear();
+      processedPlaybackKeysRef.current.clear();
+      responseQueueRef.current = Promise.resolve();
       setIsReady(false);
     } finally {
       setBusy(false);
@@ -663,9 +711,7 @@ export function BattleV4({ cards, statuses, onBattleFinished }: Props) {
       // отдельный fallback — поллинг matchRealtime при упавшем WS.
       setIsReady(false);
       const fresh = await getCombat(match.id).catch(() => null);
-      if (fresh && fresh.events.length === 0) commitMatch(fresh.match);
-      // Полный envelope (fresh с events) сыграет consumeResolution по WS;
-      // GET здесь — только чтобы не застрять на устаревшем ходе без WS.
+      if (fresh) queueResolution(fresh);
     } finally {
       setBusy(false);
     }
