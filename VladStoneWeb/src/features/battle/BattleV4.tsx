@@ -581,9 +581,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const plannedAt = (row: number, col: number) =>
     planned.find((p) => p.row === row && p.col === col);
 
-  // Absolute spawn rows for the viewer (bottom side): rows counted from own edge.
+  // Absolute spawn rows for the viewer: card zones count from the owner's edge.
   const spawnRowsFor = (card: CombatCatalogCard): number[] =>
-    (card.spawn_rows ?? []).map((r) => rows - r).filter((r) => r >= 0 && r < rows);
+    (card.spawn_rows ?? [])
+      .map((r) => (viewer?.side === "top" ? r - 1 : rows - r))
+      .filter((r) => r >= 0 && r < rows);
 
   function isValidTarget(card: CombatCatalogCard, row: number, col: number): boolean {
     if (col < 0 || col >= cols) return false;
