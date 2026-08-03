@@ -1,7 +1,10 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
+import app.api.routes.combat as combat_routes
+from app.core.config import get_settings
 from app.db.models import CombatMatchRecord
 from app.db.session import SessionLocal
 from app.main import create_app
@@ -114,6 +117,50 @@ def test_pvp_ready_resolves_only_when_both_players_confirm() -> None:
         ).status_code
         == 409
     )
+
+
+def test_pvp_turn_rate_limit_is_independent_per_authenticated_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = TestClient(create_app())
+    creator_cookie = _login(client, "rate-creator")
+    joiner_cookie = _login(client, "rate-joiner")
+    created = client.post("/api/matches/invite", cookies={"refresh_token": creator_cookie})
+    token = created.json()["invite"]["share_path"].rsplit("/", 1)[-1]
+    match_id = created.json()["match"]["id"]
+    assert client.post(
+        "/api/matches/join",
+        json={"token": token},
+        cookies={"refresh_token": joiner_cookie},
+    ).status_code == 200
+
+    monkeypatch.setattr(get_settings(), "environment", "production")
+    monkeypatch.setattr(combat_routes, "TURN_ACTION_LIMIT", 2)
+    payload = {"match_id": match_id, "turn": 1}
+
+    assert client.post(
+        "/api/combat/plan",
+        json=payload,
+        cookies={"refresh_token": creator_cookie},
+    ).status_code == 200
+    assert client.post(
+        "/api/combat/plan",
+        json=payload,
+        cookies={"refresh_token": creator_cookie},
+    ).status_code == 200
+    assert client.post(
+        "/api/combat/plan",
+        json=payload,
+        cookies={"refresh_token": creator_cookie},
+    ).status_code == 429
+
+    # The joiner has a separate bucket. With the old owner-based key this
+    # request incorrectly inherited the creator's exhausted limit.
+    assert client.post(
+        "/api/combat/plan",
+        json=payload,
+        cookies={"refresh_token": joiner_cookie},
+    ).status_code == 200
 
 
 def test_pvp_websocket_serializes_each_connection_for_its_viewer() -> None:

@@ -158,7 +158,10 @@ async def submit_turn_plan(
     планирования с debounce. Просроченный ход — 409, результат придёт по WS.
     """
     state, record, viewer_id = await _load_planning_state_or_409(db, payload, refresh_token)
-    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
+    _require_combat_rate(
+        _turn_rate_key(db, refresh_token),
+        limit=TURN_ACTION_LIMIT,
+    )
     store_pending_plan(state, viewer_id, _build_intents(viewer_id, payload))
     _save_state_or_409(db, record, state)
     return {"ok": True, "turn": state.turn}
@@ -177,7 +180,10 @@ async def set_turn_readiness(
     таймер-воркер/ленивый путь и разошлёт результат по WS.
     """
     state, record, viewer_id = await _load_planning_state_or_409(db, payload, refresh_token)
-    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
+    _require_combat_rate(
+        _turn_rate_key(db, refresh_token),
+        limit=TURN_ACTION_LIMIT,
+    )
     store_pending_plan(state, viewer_id, _build_intents(viewer_id, payload))
     set_player_ready(state, viewer_id, ready=payload.ready, now=datetime.now(UTC))
     audit(
@@ -252,7 +258,10 @@ async def resolve_combat_turn(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     record = _get_authorized_record(db, payload.match_id, refresh_token)
-    _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
+    _require_combat_rate(
+        _turn_rate_key(db, refresh_token),
+        limit=TURN_ACTION_LIMIT,
+    )
     if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
         await match_channel_manager.broadcast_expired(payload.match_id)
         raise HTTPException(
@@ -410,6 +419,12 @@ def _combat_user_or_401(db: Session, refresh_token: str | None):
     if get_settings().environment in EXTERNAL_ENVIRONMENTS and user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
+
+
+def _turn_rate_key(db: Session, refresh_token: str | None) -> str:
+    """Limit each authenticated actor independently, including PvP joiners."""
+    user = _combat_user_or_401(db, refresh_token)
+    return f"combat-turn:{user.id if user else 'local'}"
 
 
 def _require_combat_rate(key: str, *, limit: int) -> None:

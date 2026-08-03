@@ -12,11 +12,11 @@ Google-аккаунтами и сыграть один или несколько
 
 ## Вердикт
 
-**Проект почти готов к такому деплою. Перед выкладкой нужно исправить один
-кодовый блокер: общий production rate-limit двух PvP-игроков.**
+**Кодовый блокер закрыт. Проект готов к первому production smoke на VPS и
+последующему матчу с другом.**
 
-После исправления можно поднимать один VPS, проходить production smoke и сразу
-играть с другом. Deck builder, ежедневки, 20–30 карт, Sentry, нагрузочное
+Теперь можно поднимать один VPS, проходить production smoke и играть с другом.
+Deck builder, ежедневки, 20–30 карт, Sentry, нагрузочное
 тестирование и полноценная release-инфраструктура для этой цели не нужны.
 
 ## Что уже готово
@@ -38,34 +38,36 @@ Google-аккаунтами и сыграть один или несколько
 - Production guards: без сессии нельзя создавать внешний бой, dev telemetry
   выключена, размеры HTTP/WS payload ограничены.
 
-## Единственный блокер перед деплоем
+## Исправленный риск: PvP rate-limit
 
-`POST /combat/plan` и `POST /combat/ready` используют rate-limit key на основе
-`record.owner_user_id` в
-[combat.py](../VladStoneAPI/app/api/routes/combat.py). В PvP это id создателя
-матча, поэтому запросы обоих игроков попадают в один общий bucket.
+Раньше `POST /combat/plan`, `POST /combat/ready` и ручной resolve использовали
+rate-limit key на основе `record.owner_user_id`. В PvP запросы обоих игроков
+попадали в bucket создателя.
 
 Frontend отправляет `/plan` после каждого изменения расстановки и отдельный
-`/ready`. В длинном матче лимит может закончиться и один из игроков получит
-`429 Too Many Requests`.
+`/ready`, поэтому в длинном матче общий лимит мог закончиться.
 
-Перед деплоем нужно:
+Исправлено в [combat.py](../VladStoneAPI/app/api/routes/combat.py):
 
-1. Считать turn-action limit по authenticated user, который отправил запрос.
-2. Не заставлять двух участников делить один bucket.
-3. Добавить production-mode regression test для двух участников.
+- turn-action key строится по authenticated user, который отправил запрос;
+- создатель и присоединившийся друг расходуют независимые buckets;
+- production-mode regression в
+  [test_pvp_invites.py](../VladStoneAPI/tests/test_pvp_invites.py) исчерпывает
+  bucket создателя и проверяет, что план второго игрока всё равно принимается.
 
-Это техническое исправление, а не вопрос игрового дизайна.
+Лимит и его защитная функция сохранены: один игрок по-прежнему получает `429`
+после собственного превышения, но больше не может исчерпать лимит друга.
 
 ## Фактические проверки
 
 | Проверка | Результат |
 |---|---|
-| Backend `pytest` | 180 passed, 1 skipped |
+| Backend `pytest` | 181 passed, 1 skipped |
 | Frontend `npm run build` | Успешно |
 | Production Compose parse | Успешно |
 | `pip check` | No broken requirements |
-| `ruff check .` | Падает на import order в локально изменённом владельцем `tests/test_combat_api.py` |
+| `ruff check app tests/test_pvp_invites.py` | Успешно |
+| Полный `ruff check .` | В локальном worktree остаётся чужой import-order diff в `tests/test_combat_api.py` |
 | Docker image build | Не проверен: локальный Docker daemon был выключен |
 
 Ошибка `ruff` относится к незакоммиченному пользовательскому worktree и не
@@ -109,7 +111,7 @@ Frontend отправляет `/plan` после каждого изменени
 
 Можно отправлять invite другу, когда:
 
-- [ ] Исправлен общий PvP rate-limit и добавлен regression test.
+- [x] Исправлен общий PvP rate-limit и добавлен regression test.
 - [ ] В чистом deploy SHA зелёные `pytest`, `ruff` и frontend build.
 - [ ] На VPS успешно собрались оба images.
 - [ ] `/api/health` показывает `environment=production`.
