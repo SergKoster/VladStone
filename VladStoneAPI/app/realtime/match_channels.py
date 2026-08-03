@@ -16,6 +16,7 @@ SEND_TIMEOUT_SECONDS = 3
 
 @dataclass
 class _Connection:
+    viewer_id: str | None
     queue: asyncio.Queue[dict]
     sender_task: asyncio.Task[None]
 
@@ -24,11 +25,17 @@ class MatchChannelManager:
     def __init__(self) -> None:
         self._connections: dict[str, dict[WebSocket, _Connection]] = defaultdict(dict)
 
-    async def connect(self, match_id: str, websocket: WebSocket) -> None:
+    async def connect(
+        self,
+        match_id: str,
+        websocket: WebSocket,
+        *,
+        viewer_id: str | None,
+    ) -> None:
         await websocket.accept()
         queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=OUTBOUND_QUEUE_SIZE)
         sender_task = asyncio.create_task(self._send_loop(match_id, websocket, queue))
-        self._connections[match_id][websocket] = _Connection(queue, sender_task)
+        self._connections[match_id][websocket] = _Connection(viewer_id, queue, sender_task)
 
     def disconnect(self, match_id: str, websocket: WebSocket) -> None:
         sockets = self._connections.get(match_id)
@@ -55,6 +62,7 @@ class MatchChannelManager:
                 "type": "match.snapshot",
                 **v4_combat_response(
                     match,
+                    viewer_id=self._viewer_id_for(match.id, websocket),
                     events=events,
                     resolved_turn=resolved_turn,
                 ),
@@ -74,17 +82,20 @@ class MatchChannelManager:
         events: list | None = None,
         resolved_turn: int | None = None,
     ) -> None:
-        await self._broadcast(
-            match.id,
-            {
-                "type": "match.updated",
-                **v4_combat_response(
-                    match,
-                    events=events,
-                    resolved_turn=resolved_turn,
-                ),
-            },
-        )
+        for websocket, connection in list(self._connections.get(match.id, {}).items()):
+            self._enqueue(
+                match.id,
+                websocket,
+                {
+                    "type": "match.updated",
+                    **v4_combat_response(
+                        match,
+                        viewer_id=connection.viewer_id,
+                        events=events,
+                        resolved_turn=resolved_turn,
+                    ),
+                },
+            )
 
     async def broadcast_expired(self, match_id: str) -> None:
         payload = {"type": "match.updated", **expired_match_payload(match_id)}
@@ -105,6 +116,10 @@ class MatchChannelManager:
             # остальных. Закрываем его асинхронно, не ожидая сетевой операции.
             self.disconnect(match_id, websocket)
             asyncio.create_task(self._close_slow_socket(websocket))
+
+    def _viewer_id_for(self, match_id: str, websocket: WebSocket) -> str | None:
+        connection = self._connections.get(match_id, {}).get(websocket)
+        return connection.viewer_id if connection is not None else None
 
     async def _send_loop(
         self,

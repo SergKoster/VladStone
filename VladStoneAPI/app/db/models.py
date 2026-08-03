@@ -166,3 +166,50 @@ class CombatMatchRecord(Base):
     )
 
     __mapper_args__ = {"version_id_col": version}
+
+
+class CombatMatchParticipant(Base):
+    """Indexed account ↔ seat membership for authorization and reconnect."""
+
+    __tablename__ = "combat_match_participants"
+    __table_args__ = (
+        UniqueConstraint("match_id", "user_id", name="uq_match_participants_match_user"),
+        UniqueConstraint("match_id", "player_id", name="uq_match_participants_match_player"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[str] = mapped_column(ForeignKey("combat_matches.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    player_id: Mapped[str] = mapped_column(String(64))
+    team: Mapped[int] = mapped_column(Integer)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+class MatchInviteRecord(Base):
+    """Single-use invitation capability. Only its SHA-256 digest is persisted."""
+
+    __tablename__ = "match_invites"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    match_id: Mapped[str] = mapped_column(
+        ForeignKey("combat_matches.id"),
+        unique=True,
+        index=True,
+    )
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )

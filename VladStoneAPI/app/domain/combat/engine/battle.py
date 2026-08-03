@@ -7,6 +7,7 @@ BattleStateV4 — то, что сериализуется в БД (движок 
 """
 
 import random
+import secrets
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field
@@ -65,6 +66,9 @@ class BattleStateV4(BaseModel):
     spell_coin: int = 0
     # Счётчик призванных юнитов — детерминированные id токенов.
     token_seq: int = 0
+    # PvP lobby creates this once and activation uses it for fair, reproducible
+    # initial hands and first-spell order. It stays server-side.
+    rng_seed: int | None = None
     planning_deadline: datetime | None = None
     players: list[PlayerState]
     units: list[UnitState] = Field(default_factory=list)
@@ -147,6 +151,53 @@ def create_v4_battle(
     return state
 
 
+def create_v4_pvp_lobby(*, match_id: str, creator_user_id: int) -> BattleStateV4:
+    """Create an unplayable 1v1 lobby; activation starts the actual battle.
+
+    The second human seat deliberately has no account, cards or towers yet.
+    This keeps a pending invite outside the timer worker and prevents a player
+    from interacting with the board before an opponent has accepted.
+    """
+    creator = create_participant(
+        player_id="p1", team=0, user_id=creator_user_id, mana=0
+    )
+    opponent = create_participant(player_id="p2", team=1, mana=0)
+    return BattleStateV4(
+        id=match_id,
+        status=MatchLifecycleStatus.WAITING_FOR_OPPONENT,
+        players=[opponent, creator],
+        rng_seed=secrets.randbits(63),
+    )
+
+
+def activate_v4_pvp_battle(
+    state: BattleStateV4,
+    *,
+    opponent_user_id: int,
+    now: datetime | None = None,
+) -> None:
+    """Atomically turn a pending lobby into a playable two-human match."""
+    if state.status != MatchLifecycleStatus.WAITING_FOR_OPPONENT:
+        raise ValueError("PvP lobby is not waiting for an opponent")
+    opponent = next((p for p in state.players if p.user_id is None and not p.is_bot), None)
+    if opponent is None:
+        raise ValueError("PvP lobby has no vacant human seat")
+
+    started_at = _as_utc(now or datetime.now(UTC))
+    rng = random.Random(state.rng_seed)
+    opponent.user_id = opponent_user_id
+    for player in state.players:
+        player.mana = v4_mana_gain(1)
+        deal_v4_hand(player, rng=rng)
+    state.spell_coin = rng.randrange(len(state.players))
+    ctx = build_context(state)
+    for player in state.players:
+        add_towers(ctx, player)
+    apply_context(state, ctx)
+    state.status = MatchLifecycleStatus.PLANNING
+    state.planning_deadline = started_at + timedelta(seconds=turn_duration_seconds(1))
+
+
 def store_pending_plan(
     state: BattleStateV4, player_id: str, intents: PlayerIntents
 ) -> None:
@@ -170,9 +221,11 @@ def set_player_ready(
 
 
 def is_early_resolve_due(state: BattleStateV4, *, now: datetime) -> bool:
-    """Ранний резолв: люди готовы и окно отмены (бот-Готов) истекло."""
+    """Early resolve for all humans; only bot matches retain an undo window."""
     if state.ready_since is None:
         return False
+    if not any(player.is_bot for player in state.players):
+        return True
     return _as_utc(now) >= state.ready_since + timedelta(seconds=BOT_READY_DELAY_SECONDS)
 
 
@@ -184,7 +237,8 @@ def pending_intents_for(state: BattleStateV4, player_id: str) -> PlayerIntents:
 def resolve_v4_turn(
     state: BattleStateV4,
     *,
-    human_intents: PlayerIntents,
+    human_intents: PlayerIntents | None = None,
+    human_intents_by_player: dict[str, PlayerIntents] | None = None,
     now: datetime | None = None,
     rng: random.Random | None = None,
 ) -> list[EngineEvent]:
@@ -196,7 +250,14 @@ def resolve_v4_turn(
     checked_at = _as_utc(now or datetime.now(UTC))
     resolved_turn = state.turn
     ctx = build_context(state, rng=rng)
-    intents = [human_intents]
+    submitted = dict(human_intents_by_player or {})
+    if human_intents is not None:
+        submitted[human_intents.player_id] = human_intents
+    intents = [
+        submitted.get(player.id) or PlayerIntents(player_id=player.id)
+        for player in state.players
+        if not player.is_bot
+    ]
     for player in state.players:
         if player.is_bot:
             intents.append(plan_bot_intents(ctx, player.id))

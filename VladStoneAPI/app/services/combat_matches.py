@@ -4,15 +4,16 @@ import json
 from datetime import UTC, datetime
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import CombatMatchRecord
+from app.db.models import CombatMatchParticipant, CombatMatchRecord
 from app.domain.combat.constants import RULESET_VERSION
 from app.domain.combat.engine.battle import BattleStateV4
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
 
 ACTIVE_MATCH_STATUSES = (
+    MatchLifecycleStatus.WAITING_FOR_OPPONENT.value,
     MatchLifecycleStatus.PLANNING.value,
     MatchLifecycleStatus.RESOLVING.value,
 )
@@ -51,6 +52,16 @@ class SqlAlchemyCombatMatchStore:
             winner_id=match.result.winner_id,
         )
         self.db.add(record)
+        for player in match.players:
+            if player.user_id is not None:
+                self.db.add(
+                    CombatMatchParticipant(
+                        match_id=match.id,
+                        user_id=player.user_id,
+                        player_id=player.id,
+                        team=player.team,
+                    )
+                )
         return record
 
     def get(self, match_id: str) -> CombatMatchRecord | None:
@@ -102,6 +113,62 @@ def get_combat_match_record(db: Session, match_id: str) -> CombatMatchRecord | N
 
 def list_active_combat_match_records(db: Session, *, owner_user_id: int) -> list[CombatMatchRecord]:
     return SqlAlchemyCombatMatchStore(db).list_active(owner_user_id=owner_user_id)
+
+
+def list_active_combat_match_records_for_user(
+    db: Session,
+    *,
+    user_id: int,
+) -> list[CombatMatchRecord]:
+    return list(
+        db.scalars(
+            select(CombatMatchRecord)
+            .outerjoin(
+                CombatMatchParticipant,
+                CombatMatchParticipant.match_id == CombatMatchRecord.id,
+            )
+            .where(
+                or_(
+                    CombatMatchParticipant.user_id == user_id,
+                    CombatMatchRecord.owner_user_id == user_id,
+                )
+            )
+            .where(CombatMatchRecord.status.in_(ACTIVE_MATCH_STATUSES))
+            .order_by(CombatMatchRecord.updated_at.desc())
+        )
+    )
+
+
+def get_combat_match_participant(
+    db: Session,
+    *,
+    match_id: str,
+    user_id: int,
+) -> CombatMatchParticipant | None:
+    return db.scalar(
+        select(CombatMatchParticipant).where(
+            CombatMatchParticipant.match_id == match_id,
+            CombatMatchParticipant.user_id == user_id,
+        )
+    )
+
+
+def add_combat_match_participant(
+    db: Session,
+    *,
+    match_id: str,
+    user_id: int,
+    player_id: str,
+    team: int,
+) -> CombatMatchParticipant:
+    participant = CombatMatchParticipant(
+        match_id=match_id,
+        user_id=user_id,
+        player_id=player_id,
+        team=team,
+    )
+    db.add(participant)
+    return participant
 
 
 def load_match(record: CombatMatchRecord) -> MatchState:

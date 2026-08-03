@@ -74,6 +74,7 @@ class CombatTargetKind(StrEnum):
 
 
 class MatchLifecycleStatus(StrEnum):
+    WAITING_FOR_OPPONENT = "waiting_for_opponent"
     PLANNING = "planning"
     RESOLVING = "resolving"
     FINISHED = "finished"

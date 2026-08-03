@@ -135,6 +135,7 @@ def v4_combat_response(
                 "team": player.team,
                 "is_bot": player.is_bot,
                 "mana": player.mana,
+                "ready": player.id in state.ready_player_ids,
                 "hand": list(player.hand) if player.id == viewer_id else [],
                 "hand_count": len(player.hand),
                 "deck_count": len(player.deck),

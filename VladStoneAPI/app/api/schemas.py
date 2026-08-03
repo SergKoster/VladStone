@@ -55,6 +55,10 @@ class ReadyTurnRequest(ResolveTurnRequest):
     ready: bool = True
 
 
+class JoinMatchInviteRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+
+
 class ClientEventRequest(BaseModel):
     event: str = Field(min_length=1, max_length=64)
     payload: dict[str, Any] = Field(default_factory=dict, max_length=24)

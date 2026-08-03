@@ -32,8 +32,9 @@ from app.services.combat_matches import (
     expire_combat_match_if_stale,
     expire_stale_combat_matches,
     expired_match_payload,
+    get_combat_match_participant,
     get_combat_match_record,
-    list_active_combat_match_records,
+    list_active_combat_match_records_for_user,
     load_v4_battle,
     save_v4_battle,
 )
@@ -95,7 +96,7 @@ def list_active_combat(
     if expired_count:
         audit(db, user.id, "combat.matches_expired", {"expired_count": expired_count})
         db.commit()
-    records = list_active_combat_match_records(db, owner_user_id=user.id)
+    records = list_active_combat_match_records_for_user(db, user_id=user.id)
     # Ruleset gate: matches from an older ruleset are expired here instead of
     # being offered for restore (the client must never resume them).
     outdated_ids = [record.id for record in records if expire_combat_match_if_outdated(record)]
@@ -104,7 +105,15 @@ def list_active_combat(
             audit(db, user.id, "combat.match_expired_ruleset", {"match_id": match_id})
         db.commit()
         records = [record for record in records if record.id not in outdated_ids]
-    return {"matches": [v4_combat_response(load_v4_battle(record))["match"] for record in records]}
+    return {
+        "matches": [
+            v4_combat_response(
+                load_v4_battle(record),
+                viewer_id=_viewer_id_for_record(db, load_v4_battle(record), record, refresh_token),
+            )["match"]
+            for record in records
+        ]
+    }
 
 
 @router.get("/{match_id}")
@@ -126,10 +135,15 @@ async def get_combat_match(
         )
         return v4_combat_response(
             resolved.state,
+            viewer_id=_viewer_id_for_record(db, resolved.state, record, refresh_token),
             events=resolved.events,
             resolved_turn=resolved.resolved_turn,
         )
-    return v4_combat_response(load_v4_battle(record))
+    state = load_v4_battle(record)
+    return v4_combat_response(
+        state,
+        viewer_id=_viewer_id_for_record(db, state, record, refresh_token),
+    )
 
 
 @router.post("/plan")
@@ -143,10 +157,9 @@ async def submit_turn_plan(
     Дедлайн/ранний резолв применят именно этот план; клиент шлёт его по мере
     планирования с debounce. Просроченный ход — 409, результат придёт по WS.
     """
-    state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    state, record, viewer_id = await _load_planning_state_or_409(db, payload, refresh_token)
     _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
-    human = human_players(state)[0]
-    store_pending_plan(state, human.id, _build_intents(human.id, payload))
+    store_pending_plan(state, viewer_id, _build_intents(viewer_id, payload))
     _save_state_or_409(db, record, state)
     return {"ok": True, "turn": state.turn}
 
@@ -163,11 +176,10 @@ async def set_turn_readiness(
     BOT_READY_DELAY_SECONDS (окно отмены), после чего ход дорезолвит
     таймер-воркер/ленивый путь и разошлёт результат по WS.
     """
-    state, record = await _load_planning_state_or_409(db, payload, refresh_token)
+    state, record, viewer_id = await _load_planning_state_or_409(db, payload, refresh_token)
     _require_combat_rate(f"combat-turn:{record.owner_user_id or 'local'}", limit=TURN_ACTION_LIMIT)
-    human = human_players(state)[0]
-    store_pending_plan(state, human.id, _build_intents(human.id, payload))
-    set_player_ready(state, human.id, ready=payload.ready, now=datetime.now(UTC))
+    store_pending_plan(state, viewer_id, _build_intents(viewer_id, payload))
+    set_player_ready(state, viewer_id, ready=payload.ready, now=datetime.now(UTC))
     audit(
         db,
         record.owner_user_id,
@@ -175,6 +187,9 @@ async def set_turn_readiness(
         {"match_id": state.id, "turn": state.turn},
     )
     _save_state_or_409(db, record, state)
+    # Ready is public lobby state, unlike the private plan itself. This lets a
+    # PvP opponent see confirmation promptly without learning any placements.
+    await match_channel_manager.broadcast_match_update(state)
     return {"ok": True, "turn": state.turn, "ready": payload.ready}
 
 
@@ -213,7 +228,7 @@ async def _load_planning_state_or_409(
             status_code=status.HTTP_409_CONFLICT,
             detail="Combat turn is no longer current",
         )
-    return state, record
+    return state, record, _viewer_id_for_record(db, state, record, refresh_token)
 
 
 def _save_state_or_409(db: Session, record, state) -> None:
@@ -269,8 +284,13 @@ async def resolve_combat_turn(
             detail="Combat turn is no longer current",
         )
 
-    acting_player = human_players(state)[0]
-    intents = _build_intents(acting_player.id, payload)
+    if len(human_players(state)) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Manual resolve is unavailable for PvP matches",
+        )
+    acting_player_id = _viewer_id_for_record(db, state, record, refresh_token)
+    intents = _build_intents(acting_player_id, payload)
     events = resolve_v4_turn(state, human_intents=intents)
     save_v4_battle(record, state)
 
@@ -320,7 +340,7 @@ async def resolve_combat_turn(
 
     response = v4_combat_response(
         state,
-        viewer_id=acting_player.id,
+        viewer_id=acting_player_id,
         events=events,
         resolved_turn=payload.turn,
     )
@@ -349,12 +369,39 @@ def _get_authorized_record(db: Session, match_id: str, refresh_token: str | None
             status_code=status.HTTP_404_NOT_FOUND, detail="Combat match not found"
         )
     user = _combat_user_or_401(db, refresh_token)
-    if record.owner_user_id is not None and (user is None or record.owner_user_id != user.id):
+    if user is not None:
+        participant = get_combat_match_participant(db, match_id=match_id, user_id=user.id)
+        # owner fallback keeps active matches created before participant
+        # projection usable after deploy; new matches always have a row.
+        if participant is None and record.owner_user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Combat match belongs to another user",
+            )
+    elif record.owner_user_id is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Combat match belongs to another user",
         )
     return record
+
+
+def _viewer_id_for_record(
+    db: Session,
+    state,
+    record,
+    refresh_token: str | None,
+) -> str | None:
+    user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
+    if user is not None:
+        participant = get_combat_match_participant(db, match_id=record.id, user_id=user.id)
+        if participant is not None:
+            return participant.player_id
+        player = next((item for item in state.players if item.user_id == user.id), None)
+        if player is not None:
+            return player.id
+    humans = human_players(state)
+    return humans[0].id if humans else None
 
 
 def _combat_user_or_401(db: Session, refresh_token: str | None):

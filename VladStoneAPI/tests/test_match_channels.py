@@ -23,7 +23,7 @@ def test_slow_socket_does_not_block_match_broadcast() -> None:
     async def scenario() -> None:
         manager = MatchChannelManager()
         socket = _SlowSocket()
-        await manager.connect("match", socket)  # type: ignore[arg-type]
+        await manager.connect("match", socket, viewer_id="p1")  # type: ignore[arg-type]
         manager._enqueue("match", socket, {"n": 0})  # type: ignore[arg-type]
         await socket.send_started.wait()
 

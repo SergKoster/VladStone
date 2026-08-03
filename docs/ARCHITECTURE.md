@@ -496,6 +496,16 @@ payload матча (уже так, `MatchState.rows/cols`); **клиент ст�
 > [PVP_INVITE_PLAN.md](PVP_INVITE_PLAN.md). Этот раздел фиксирует целевое
 > состояние; план раскладывает его на миграции, API, frontend и проверки.
 
+**Backend vertical slice PVP-1–PVP-4 реализован** (август 2026): миграция
+`0003_pvp_invites` добавляет индексную проекцию `combat_match_participants` и
+одноразовые `match_invites` с digest токена; `POST /matches/invite` создаёт
+`waiting_for_opponent` lobby, `POST /matches/join` атомарно занимает второй
+seat и запускает v4-матч. `GET /matches/{id}/lobby` и cancel-route обслуживают
+ожидание. Auth `/combat`, active-list, таймер и WS привязаны к participant,
+а не единственному owner; каждое WS-соединение хранит свой `viewer_id` и
+получает отдельный payload. Frontend lobby/deep link и reconnect-resume всё ещё
+следуют по PVP-5/PVP-6.
+
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
 - **Матч = N участников в командах**: у `PlayerState` есть `team` (сторона поля
@@ -530,10 +540,12 @@ payload матча (уже так, `MatchState.rows/cols`); **клиент ст�
 COMBAT_REWORK §23.1.
 
 Осталось для PvP (целевое состояние):
-- Планирование: все участники шлют placements до дедлайна; резолв — когда все
-  подтвердили «готов» или по таймеру. Ранний резолв при полном наборе confirm.
-- Invite flow: `POST /matches/invite` → токен/ссылка → `POST /matches/join`.
-  Матч в статусе `waiting_for_opponent` до присоединения.
+- Планирование: backend собирает plans всех людей к дедлайну; pure PvP
+  резолвится сразу при полном наборе confirm (bot-delay остаётся только PvE).
+  Frontend ещё должен показать публичную ready-индикацию соперника.
+- Invite flow backend: `POST /matches/invite` → токен/ссылка →
+  `POST /matches/join`; матч в `waiting_for_opponent` до присоединения.
+  Не реализованы браузерный deep link и экран lobby (PVP-5).
 - Reconnect: WS-снапшот при подключении + `/combat/active`. **Контракт
   дозагрузки посреди хода** (закрывает риск §8.15): сервер отдаёт снапшот
   *начала последнего хода* + список combat-событий этого хода +
@@ -558,8 +570,8 @@ COMBAT_REWORK §23.1.
   Клиент ход сам не резолвит: результат приходит envelope'ом по WS/поллингу;
   на нуле видимого таймера — авто-Готов (гонки клиентского «запаса 2 с» больше
   не существует; `/combat/resolve` остался ручным/тестовым путём). Для PvP
-  остаётся: per-viewer события и ранний резолв по готовности всех людей —
-  модель уже общая.
+  per-viewer payload и ранний PvP-резолв по готовности всех людей реализованы;
+  остаются frontend-state готовности и reconnect-resume (PVP-5/PVP-6).
 - Матчмейкинг (stretch): таблица-очередь, первый совпавший — пара; без рейтинга.
 
 ### 5.3 Deck builder

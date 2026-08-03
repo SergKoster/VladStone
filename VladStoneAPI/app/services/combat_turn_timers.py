@@ -58,15 +58,18 @@ def resolve_expired_planning_match(
     if not deadline_hit and not is_early_resolve_due(state, now=checked_at):
         return None
 
-    human = human_players(state)[0]
     resolved_turn = state.turn
     events = resolve_v4_turn(
         state,
-        human_intents=pending_intents_for(state, human.id),
+        human_intents_by_player={
+            human.id: pending_intents_for(state, human.id) for human in human_players(state)
+        },
         now=checked_at,
     )
     save_v4_battle(record, state)
-    if record.owner_user_id is not None:
+    # PvP rewards are a product decision (O1/O6); preserve existing PvE
+    # placeholder behaviour without accidentally granting it to both humans.
+    if record.owner_user_id is not None and len(human_players(state)) == 1:
         claim_combat_reward(db, match=state, user_id=record.owner_user_id)
     return ResolvedPlanningMatch(
         state=state,

@@ -8,6 +8,7 @@ from app.realtime.match_channels import match_channel_manager
 from app.services.auth import get_user_by_refresh_token
 from app.services.combat_matches import (
     expire_combat_match_if_outdated,
+    get_combat_match_participant,
     get_combat_match_record,
     load_v4_battle,
 )
@@ -31,7 +32,15 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
         if get_settings().environment in EXTERNAL_ENVIRONMENTS and user is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-        if record.owner_user_id is not None and (user is None or record.owner_user_id != user.id):
+        participant = (
+            get_combat_match_participant(db, match_id=match_id, user_id=user.id)
+            if user is not None
+            else None
+        )
+        if user is not None and participant is None and record.owner_user_id != user.id:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        if user is None and record.owner_user_id is not None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
@@ -47,6 +56,17 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             match = resolved.state
         else:
             match = load_v4_battle(record)
+        viewer_id = participant.player_id if participant is not None else next(
+            (
+                player.id
+                for player in match.players
+                if user is not None and player.user_id == user.id
+            ),
+            None,
+        )
+        if viewer_id is None:
+            humans = [player for player in match.players if not player.is_bot]
+            viewer_id = humans[0].id if humans else None
 
     # Ленивый дорезолв на reconnect — такой же серверный факт, как дорезолв
     # HTTP/воркером. Сначала сообщаем уже подключённым клиентам, затем новый
@@ -58,7 +78,7 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             resolved_turn=resolved.resolved_turn,
         )
 
-    await match_channel_manager.connect(match_id, websocket)
+    await match_channel_manager.connect(match_id, websocket, viewer_id=viewer_id)
     try:
         await match_channel_manager.send_snapshot(
             websocket,
