@@ -28,7 +28,7 @@ const RARITY_LABEL: Record<Rarity, string> = {
   legendary: "Легендарная",
 };
 
-type CollectionMeta = Pick<CollectionCard, "ascension" | "copies">;
+type CollectionMeta = Pick<CollectionCard, "copies">;
 type CoverageCell = { forward: number; col: number };
 type UnitDetailState = Pick<
   CombatUnit,
@@ -125,7 +125,7 @@ export function CardDetail({
               ) : null}
               {collectionMeta ? (
                 <span className="muted">
-                  {collectionMeta.ascension} · повторки {collectionMeta.copies}/2
+                  Копий: {collectionMeta.copies}
                 </span>
               ) : null}
             </p>

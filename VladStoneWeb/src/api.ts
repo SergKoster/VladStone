@@ -20,18 +20,8 @@ export type ProfileResponse = {
 
 export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
-export type CollectionCard = {
-  id: string;
-  name: string;
-  cost: number;
-  rarity: Rarity;
-  hp: number;
-  damage: number;
-  range: number;
-  steps: number;
-  attacks: number;
+export type CollectionCard = CombatCatalogCard & {
   copies: number;
-  ascension: "Дефолт" | "Возвышенный" | "Возвышенный+";
 };
 
 export type CombatStance = "attack" | "defense";
@@ -299,13 +289,6 @@ export function getCombatCatalog() {
 
 export function getCollection() {
   return request<{ cards: CollectionCard[] }>("/me/collection");
-}
-
-export function ascendCard(cardId: string, ascension = "default") {
-  return request<{ cards: CollectionCard[] }>(`/me/collection/${cardId}/ascend`, {
-    method: "POST",
-    body: JSON.stringify({ ascension }),
-  });
 }
 
 export function logout() {

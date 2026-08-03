@@ -27,10 +27,6 @@ class AuthResponse(BaseModel):
     user: dict
 
 
-class AscendCardRequest(BaseModel):
-    ascension: str = "default"
-
-
 class PlacementRequest(BaseModel):
     card_id: str
     row: int

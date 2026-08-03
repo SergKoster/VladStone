@@ -5,9 +5,10 @@
  */
 import { type CollectionCard } from "../api";
 import { CardArt } from "./cardArt";
-import { BootIcon, BurstIcon, HeartIcon, ManaIcon, RangeIcon, SwordIcon } from "./icons";
+import { BootIcon, BurstIcon, HeartIcon, ManaIcon, SwordIcon } from "./icons";
 
 export function Card({ card }: { card: CollectionCard }) {
+  const stats = card.stats;
   return (
     <div className="card-face" data-rarity={card.rarity}>
       <div className="card-art-wrap">
@@ -16,30 +17,36 @@ export function Card({ card }: { card: CollectionCard }) {
           <ManaIcon />
           {card.cost}
         </span>
-        <span className="card-pip damage">
-          <BurstIcon />
-          {card.damage}
-        </span>
-        <span className="card-pip hp">
-          <HeartIcon />
-          {card.hp}
-        </span>
+        {stats ? (
+          <>
+            <span className="card-pip damage">
+              <BurstIcon />
+              {stats.damage}
+            </span>
+            <span className="card-pip hp">
+              <HeartIcon />
+              {stats.hp}
+            </span>
+          </>
+        ) : null}
       </div>
       <div className="card-info">
         <span className="card-name">{card.name}</span>
         <div className="card-footer">
-          <span className="card-stat" title="Атаки за ход">
-            <SwordIcon />
-            {card.attacks}
-          </span>
-          <span className="card-stat" title="Шаги за ход">
-            <BootIcon />
-            {card.steps}
-          </span>
-          <span className="card-stat" title="Дальность">
-            <RangeIcon />
-            {card.range}
-          </span>
+          {stats ? (
+            <>
+              <span className="card-stat" title="Атаки за ход">
+                <SwordIcon />
+                {stats.attacks_per_turn}
+              </span>
+              <span className="card-stat" title="Шаги за ход">
+                <BootIcon />
+                {stats.move_steps}
+              </span>
+            </>
+          ) : (
+            <span className="card-stat">Заклинание</span>
+          )}
         </div>
       </div>
     </div>

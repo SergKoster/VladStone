@@ -15,8 +15,11 @@ from app.db.models import (
     PlayerProfile,
     User,
 )
-from app.domain.catalog import STARTER_CARD_COPIES
-from app.domain.combat.rules import STARTER_CARDS
+from app.domain.combat.engine.catalog import (
+    collectible_v4_cards,
+    db_projection,
+    starter_grant_card_ids,
+)
 
 
 def normalize_email(email: str) -> str:
@@ -24,22 +27,15 @@ def normalize_email(email: str) -> str:
 
 
 def ensure_seed_cards(db: Session) -> None:
-    # The domain catalog (cards.py) is the single source of card stats; the DB
-    # rows are a projection for joins — sync them on every seed pass so stat
-    # changes in the catalog reach existing databases too.
-    for card in STARTER_CARDS:
+    # The v4 catalog is the source of truth; these rows preserve foreign keys
+    # and synchronise existing databases whenever a player signs in.
+    for card in collectible_v4_cards():
         existing = db.get(CardDefinition, card.id)
         if existing is None:
             existing = CardDefinition(id=card.id)
             db.add(existing)
-        existing.name = card.name
-        existing.cost = card.cost
-        existing.hp = card.stats.hp
-        existing.damage = card.stats.damage
-        existing.attack_range = card.stats.attack_range
-        existing.move_steps = card.stats.move_steps
-        existing.attacks = card.stats.attacks
-        existing.action_priority = card.stats.action_priority.value
+        for field, value in db_projection(card).items():
+            setattr(existing, field, value)
 
 
 def get_or_create_user_for_identity(
@@ -85,7 +81,7 @@ def get_or_create_user_for_identity(
 
 def grant_starter_collection(db: Session, user_id: int) -> None:
     ensure_seed_cards(db)
-    for card_id, copies in STARTER_CARD_COPIES.items():
+    for card_id in starter_grant_card_ids():
         player_card = db.scalar(
             select(PlayerCard).where(
                 PlayerCard.user_id == user_id,
@@ -99,7 +95,7 @@ def grant_starter_collection(db: Session, user_id: int) -> None:
                     user_id=user_id,
                     card_id=card_id,
                     ascension="default",
-                    copies=copies,
+                    copies=1,
                 )
             )
 
@@ -113,4 +109,3 @@ def audit(db: Session, user_id: int | None, action: str, metadata: dict) -> None
             created_at=datetime.now(UTC),
         )
     )
-

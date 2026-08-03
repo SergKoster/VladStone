@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.domain.combat.cards import STARTER_CARDS
+from app.domain.combat.engine.catalog import starter_grant_card_ids
 from app.main import create_app
 
 
@@ -30,14 +30,14 @@ def test_email_code_login_and_collection() -> None:
     collection_response = client.get("/api/me/collection")
     assert collection_response.status_code == 200
     cards = collection_response.json()["cards"]
-    assert {card["id"] for card in cards} == {card.id for card in STARTER_CARDS}
-
-    ascend_response = client.post("/api/me/collection/test_bruiser/ascend", json={})
-    assert ascend_response.status_code == 200
-    ascended_cards = ascend_response.json()["cards"]
-    bruiser_rows = [card for card in ascended_cards if card["id"] == "test_bruiser"]
-    assert any(card["ascension"] == "Возвышенный" and card["copies"] == 1 for card in bruiser_rows)
-    assert not any(card["ascension"] == "Дефолт" and card["copies"] == 0 for card in bruiser_rows)
+    combat_catalog = client.get("/api/combat/catalog").json()["cards"]
+    assert {card["id"] for card in cards} == set(starter_grant_card_ids())
+    assert all(card["copies"] == 1 for card in cards)
+    collection_metadata = [
+        {key: value for key, value in card.items() if key != "copies"} for card in cards
+    ]
+    assert collection_metadata == combat_catalog
+    assert client.post("/api/me/collection/test_bruiser/ascend", json={}).status_code == 404
 
     logout_response = client.post("/api/auth/logout")
     assert logout_response.status_code == 200

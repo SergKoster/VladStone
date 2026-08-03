@@ -194,7 +194,6 @@ function App() {
           <Collection
             cards={collection}
             catalog={catalog}
-            onCollectionChange={collectionState.setData}
           />
         )}
         {route === "battle" && (

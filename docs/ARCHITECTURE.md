@@ -737,22 +737,16 @@ COMBAT_REWORK §23.1.
     матча держат сжатие таймера + суд (DESIGN §3.5). Замыкание
     `turns_since_any_placement` ≥ K — резервный вариант, если пустые матчи
     реально начнут грузить воркер (не сейчас).
-18. **Split-brain каталога v4 и коллекции — High, до deck builder** (аудит
-    15 июля 2026): live-бой и `/combat/catalog` читают 12 карт из
-    `engine/content.py`, а `accounts.ensure_seed_cards`, `/me/collection`,
-    `_card_rarity` и стартовая выдача продолжают читать legacy
-    `domain/combat/cards.py` (11 карт, статы = 1, старые редкости). Поэтому
-    коллекция показывает характеристики, которые не действуют в бою, не знает
-    `samurai_koster` и продолжает поддерживать отменённое возвышение. Текущий CI
-    это закрепляет `test_auth.py`, а не ловит как ошибку. **Фикс:** один
-    versioned v4 catalog/application service для combat catalog, DB projection,
-    starter grant, collection и будущей deck validation; миграция/seed для уже
-    созданных аккаунтов; contract-тест равенства public collection metadata и
-    live combat catalog. После этого удалить legacy-каталог и его тесты.
-    Скрытое следствие уже сейчас (аудит 16 июля 2026): `Collection.tsx`
-    открывает `CardDetail`, только если id карты коллекции найден в
-    v4-каталоге (`detailCard && detailCatalogCard`) — карта, выпавшая из
-    каталога, молча перестанет открываться.
+18. **Split-brain каталога v4 и коллекции — закрыто** (август 2026): один
+    прикладной каталог `engine/catalog.py` читает live-определения из
+    `engine/content.py` и кормит DB projection, выдачу, `/me/collection` и
+    будущую валидацию колод. `/me/collection` возвращает ровно viewer-safe
+    метаданные `/combat/catalog` плюс количество копий; это охраняет
+    контрактный тест. При следующем входе существующий аккаунт получает
+    недостающие карты live-набора. Legacy-каталог приложения удалён; старый
+    изолированный MVP combat domain остаётся только для его регрессионных
+    тестов, не участвует в live-маршрутах. Возвышение отключено в UI и API
+    согласно R9; исторические DB-колонки пока сохраняются до решения O2.
 19. **WS broadcast без backpressure — High к PvP/нагрузке** (аудит 15 июля
     2026): `MatchChannelManager._broadcast` последовательно делает
     `await websocket.send_json` для каждого сокета без timeout и без очереди.
