@@ -508,7 +508,11 @@ seat и запускает v4-матч. `GET /matches/{id}/lobby` и cancel-rout
 а не единственному owner; каждое WS-соединение хранит свой `viewer_id` и
 получает отдельный payload. Frontend PVP-5 тоже готов: hash-routes
 `invite/<token>`, `lobby/<match_id>` и `battle/<match_id>`, login round-trip,
-copy/cancel lobby и точный battle restore. Остался reconnect-resume PVP-6.
+  copy/cancel lobby и точный battle restore. **PVP-6 реализован:** перед
+  резолвом state сохраняет старт хода; HTTP/WS envelope содержит viewer-safe
+  `resume {match, resume_from_sequence}` с полной лентой, а cursor принимается
+  только для `last_resolved_turn`. Клиент дедуплицирует `(turn, sequence)` и
+  не перезаписывает сохранённый план пустым debounce после reload.
 
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
@@ -551,12 +555,11 @@ COMBAT_REWORK §23.1.
   `POST /matches/join`; матч в `waiting_for_opponent` до присоединения.
   Browser deep link и экран lobby реализованы (PVP-5).
 - Reconnect: WS-снапшот при подключении + `/combat/active`. **Контракт
-  дозагрузки посреди хода** (закрывает риск §8.15): сервер отдаёт снапшот
-  *начала последнего хода* + список combat-событий этого хода +
-  `resume_from_sequence`; клиент проигрывает ход с начала (анимация — чистая
-  функция от событий, инвариант §4.4), дедуплицируя по `(turn, sequence)` —
-  расширение уже существующего отбрасывания «WS-эха своего резолва». Уже
-  показанные ходы клиент проматывает к финалу по `resume_from_sequence`.
+  дозагрузки посреди хода реализован** (PVP-6, закрывает риск §8.15): сервер
+  отдаёт viewer-safe снимок *начала последнего хода* + список combat-событий
+  этого хода + `resume_from_sequence`; клиент проигрывает ход с начала
+  (анимация — чистая функция от событий, инвариант §4.4), дедуплицируя по
+  `(turn, sequence)`. Уже показанные ходы проматываются к финалу по cursor.
   Источник истины анимации — события, не снапшот.
 - Concede: `POST /combat/{id}/concede` → немедленный `match_finished`.
 - **Взаимная бездеятельность** (решение O11, июль 2026): отдельного AFK-детектора

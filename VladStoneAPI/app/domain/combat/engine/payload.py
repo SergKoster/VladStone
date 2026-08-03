@@ -99,6 +99,66 @@ def _pattern_cells(pattern) -> list[dict]:
     return [{"forward": o.forward, "col": o.col} for o in pattern.offsets]
 
 
+def _match_payload(state: BattleStateV4, *, viewer_id: str | None) -> dict:
+    """Viewer-safe состояние матча без ленты событий."""
+    ctx = build_context(state)
+    players_payload = []
+    for player in state.players:
+        players_payload.append(
+            {
+                "id": player.id,
+                "side": player.side.value,
+                "team": player.team,
+                "is_bot": player.is_bot,
+                "mana": player.mana,
+                "ready": player.id in state.ready_player_ids,
+                "hand": list(player.hand) if player.id == viewer_id else [],
+                "hand_count": len(player.hand),
+                "deck_count": len(player.deck),
+            }
+        )
+    return {
+        "id": state.id,
+        "ruleset_version": state.ruleset_version,
+        "status": state.status.value,
+        "turn": state.turn,
+        "rows": state.rows,
+        "cols": state.cols,
+        "mana_cap": state.mana_cap,
+        "planning_deadline": (
+            state.planning_deadline.isoformat() if state.planning_deadline else None
+        ),
+        "planning_seconds": turn_duration_seconds(state.turn),
+        "players": players_payload,
+        "viewer_id": viewer_id,
+        "units": [_unit_payload(unit, ctx.blueprint_of(unit)) for unit in state.units],
+        "tower_slots": _tower_slots_payload(state, ctx),
+        "log": [{"message": entry.message} for entry in state.log],
+        "result": state.result.model_dump(mode="json"),
+    }
+
+
+def _resume_payload(
+    state: BattleStateV4,
+    *,
+    viewer_id: str | None,
+    client_events: list,
+    resume_from_sequence: int,
+) -> dict | None:
+    """Viewer-safe старт последнего хода для replay после reconnect (PVP-6)."""
+    if not client_events or state.last_resolved_turn is None or state.last_turn_start is None:
+        return None
+    turn_start = BattleStateV4.model_validate(state.last_turn_start)
+    last_sequence = client_events[-1].sequence or 0
+    # Курсор принимается только в пределах именно этой полной ленты. Старый
+    # клиент/другой ход получает 0 и безопасно проигрывает ход с начала.
+    resume_from_sequence = min(max(resume_from_sequence, 0), last_sequence)
+    return {
+        "match": _match_payload(turn_start, viewer_id=viewer_id),
+        "resume_from_sequence": resume_from_sequence,
+    }
+
+
 def v4_catalog_payload() -> list[dict]:
     """Каталог коллекционных карт v4 для клиента (арт, статы, покрытия, зоны).
 
@@ -158,6 +218,7 @@ def v4_combat_response(
     viewer_id: str | None = None,
     events: list | None = None,
     resolved_turn: int | None = None,
+    resume_from_sequence: int = 0,
 ) -> dict:
     """Payload матча для одного клиента; events — факты последнего хода."""
     if events is None and resolved_turn is None:
@@ -167,49 +228,16 @@ def v4_combat_response(
         humans = human_players(state)
         viewer_id = humans[0].id if humans else None
 
-    ctx = build_context(state)
-    players_payload = []
-    for player in state.players:
-        players_payload.append(
-            {
-                "id": player.id,
-                "side": player.side.value,
-                "team": player.team,
-                "is_bot": player.is_bot,
-                "mana": player.mana,
-                "ready": player.id in state.ready_player_ids,
-                "hand": list(player.hand) if player.id == viewer_id else [],
-                "hand_count": len(player.hand),
-                "deck_count": len(player.deck),
-            }
-        )
-
-    match_payload = {
-        "id": state.id,
-        "ruleset_version": state.ruleset_version,
-        "status": state.status.value,
-        "turn": state.turn,
-        "rows": state.rows,
-        "cols": state.cols,
-        "mana_cap": state.mana_cap,
-        "planning_deadline": (
-            state.planning_deadline.isoformat() if state.planning_deadline else None
-        ),
-        # Длительность планирования ТЕКУЩЕГО хода (эндшпиль сжимает, DESIGN
-        # §3.5). Клиент капает видимый таймер этим числом и не дублирует
-        # формулу; буфер анимации в дедлайне остаётся сверху.
-        "planning_seconds": turn_duration_seconds(state.turn),
-        "players": players_payload,
-        "viewer_id": viewer_id,
-        "units": [_unit_payload(unit, ctx.blueprint_of(unit)) for unit in state.units],
-        "tower_slots": _tower_slots_payload(state, ctx),
-        "log": [{"message": entry.message} for entry in state.log],
-        "result": state.result.model_dump(mode="json"),
-    }
     client_events = translate_engine_events(events or [])
     return {
-        "match": match_payload,
+        "match": _match_payload(state, viewer_id=viewer_id),
         "events": [event.model_dump(mode="json") for event in client_events],
         "resolved_turn": resolved_turn,
         "last_sequence": client_events[-1].sequence if client_events else None,
+        "resume": _resume_payload(
+            state,
+            viewer_id=viewer_id,
+            client_events=client_events,
+            resume_from_sequence=resume_from_sequence,
+        ),
     }

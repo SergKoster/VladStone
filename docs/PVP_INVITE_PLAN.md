@@ -1,8 +1,9 @@
 # PvP invite — план реализации
 
-> **Статус:** в работе (3 августа 2026). Backend PVP-1–PVP-4, frontend
-> deep-link/lobby UX PVP-5 и viewer-relative поле PVP-5a реализованы; следующий
-> срез — reconnect hardening.
+> **Статус:** core готов локально (август 2026). Backend PVP-1–PVP-4,
+> frontend deep-link/lobby UX PVP-5, viewer-relative поле PVP-5a и reconnect
+> hardening PVP-6 реализованы; перед закрытием этапа остаётся внешний
+> two-device тест на production-like деплое.
 > Цель этапа — довести существующий бой v4 до первого стабильного матча двух
 > авторизованных игроков по ссылке-приглашению. Канон продукта: [DESIGN.md](DESIGN.md)
 > §6.1–§6.2; место в релизе: [ROADMAP.md](ROADMAP.md), Фаза 4; целевая
@@ -297,23 +298,37 @@ human-vs-human `BattleStateV4`; два конкурирующих join не за
 позицией `(0,0)` отрисовался во viewer-строке `4`, колонке `0`. Ошибок консоли
 в этом smoke нет.
 
-### PVP-6 — reconnect и hardening перед внешним тестом
+### PVP-6 — reconnect и hardening перед внешним тестом ✅
+
+**Сделано (август 2026):** перед каждым резолвом `BattleStateV4` сохраняет
+server-side снимок начала хода без рекурсивного роста state. HTTP и WS отдают
+viewer-safe `resume {match, resume_from_sequence}` рядом с полной лентой;
+чужая рука не попадает и в resume-снимок. WS принимает cursor только для
+`last_resolved_turn`, а фронт дедуплицирует факты по `(turn, sequence)`,
+проигрывает пропущенный ход с начала после reload и не перезаписывает
+server-stored plan пустым debounce до первого явного изменения игрока.
+Finished/expired матч закрывает realtime/polling вместо вечного reconnect.
+Регрессии покрывают HTTP/WS cursor и viewer-safe resume; локальный браузерный
+smoke reload проиграл сохранённую ленту без console errors.
 
 Файлы: payload/state событий, `ws.py`, `matchRealtime.ts`, `BattleV4.tsx`,
 интеграционные тесты; точный контракт уже описан в ARCHITECTURE §5.2/§8.15.
 
-- Реализовать snapshot начала последнего хода + events этого хода +
+- [x] Snapshot начала последнего хода + events этого хода +
   `resume_from_sequence`; дедуп `(turn, sequence)`.
-- Перезагрузка во время planning восстанавливает match, ready-state и
+- [x] Перезагрузка во время planning восстанавливает match, ready-state и
   server-stored plan. Клиент может не восстановить визуальный локальный план,
-  но не должен затереть его пустым debounce до явного действия пользователя.
-- Перезагрузка во время playback догоняет события и затем переходит к финальному
+  но не затирает его пустым debounce до явного действия пользователя.
+- [x] Перезагрузка во время playback догоняет события и затем переходит к финальному
   состоянию без второго резолва.
-- Expired/cancelled/finished lobby не остаётся «активным» и не создаёт вечный
+- [x] Expired/cancelled/finished lobby не остаётся «активным» и не создаёт вечный
   reconnect loop.
-- Добавить audit-события `match.invite_created/joined/cancelled/expired` без
-  token; метрики количества waiting lobby, join latency/errors и WS disconnect.
-- Проверить cookie flags и `Origin` у state-changing HTTP/WS handshake. Invite
+- [x] Audit-события `match.invite_created/joined/cancelled/expired` пишутся без
+  token (реализованы с PVP-1–PVP-5).
+- [ ] Production-метрики количества waiting lobby, join latency/errors и WS disconnect
+  — часть observability внешнего деплоя, нужна до публичного релиза.
+- [x] Во внешней среде WS проверяет `Origin` по `cors_origins`; cookie flags
+  управляются `cookie_secure` из единого settings. Invite
   token не считается заменой CSRF-защиты; общий CSRF-пункт Фазы 6 остаётся
   блокером публичного релиза, даже если закрытый тест с друзьями проводится
   раньше.

@@ -8,11 +8,13 @@ export type MatchRealtimeStatus =
 
 export function connectMatchRealtime({
   matchId,
+  getResumeCursor,
   onSnapshot,
   onStatus,
   onUpdate,
 }: {
   matchId: string;
+  getResumeCursor?: () => { turn: number; sequence: number } | null;
   onSnapshot: (payload: CombatResponse) => void;
   onStatus: (status: MatchRealtimeStatus) => void;
   onUpdate: (payload: CombatResponse) => void;
@@ -25,7 +27,7 @@ export function connectMatchRealtime({
 
   const connect = () => {
     onStatus("Realtime подключается...");
-    socket = createMatchSocket(matchId);
+    socket = createMatchSocket(matchId, getResumeCursor?.() ?? null);
     socket.onopen = () => {
       reconnectAttempt = 0;
       onStatus("Realtime подключен");

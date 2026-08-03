@@ -137,6 +137,13 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const autoReadyDeadline = React.useRef<string | null>(null);
   const realtimePlaybackKeyRef = React.useRef<string | null>(null);
   const processedPlaybackKeysRef = React.useRef(new Set<string>());
+  // PVP-6: события дедуплицируются не только полным envelope-ключом, но и
+  // парой (resolved turn, sequence) при reconnect/resume.
+  const replayedEventKeysRef = React.useRef(new Set<string>());
+  const completedReplayCursorRef = React.useRef<{ turn: number; sequence: number } | null>(null);
+  // До первого реального действия после reload пустой локальный `planned` не
+  // имеет права перезаписать server-stored plan debounce-запросом.
+  const planDirtyRef = React.useRef(false);
   const responseQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const consumeResolutionRef = React.useRef<(payload: CombatResponse) => Promise<void>>(
     async () => undefined,
@@ -148,6 +155,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const [inspected, setInspected] = React.useState<InspectedUnit | null>(null);
   const detailSourceRef = React.useRef<HTMLElement | null>(null);
   const [detail, setDetail] = React.useState<CombatDetail | null>(null);
+
+  function setLocalPlan(next: React.SetStateAction<Planned[]>) {
+    planDirtyRef.current = true;
+    setPlanned(next);
+  }
 
   // V8: клиентский журнал розыгрышей. Серверный match.log в v4 пуст; журнал
   // строится из событий завершённых ходов (розыгрыш публичен для обоих).
@@ -218,6 +230,14 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
 
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
     const prev = matchRef.current;
+    if (!prev || nextMatch.id !== prev.id || nextMatch.turn > prev.turn) {
+      planDirtyRef.current = false;
+    }
+    if (!prev || nextMatch.id !== prev.id) {
+      processedPlaybackKeysRef.current.clear();
+      replayedEventKeysRef.current.clear();
+      completedReplayCursorRef.current = null;
+    }
     if (prev && nextMatch.id === prev.id && nextMatch.turn > prev.turn) {
       const viewerId = nextMatch.viewer_id;
       const before = prev.players.find((p) => p.id === viewerId)?.hand ?? [];
@@ -379,12 +399,69 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   // результата `busy` у проигрывателя.
   const consumeResolution = React.useCallback(async (payload: CombatResponse) => {
     const clearPlans = () => {
+      planDirtyRef.current = false;
       setPlanned([]);
       setSelected(null);
       setIsReady(false); // V3: новый ход — готовность снята
     };
     const preMatch = matchRef.current;
+    const resolvedTurn = payload.resolved_turn;
+    const resumeSequence = payload.resume?.resume_from_sequence ?? 0;
+    const replayEvents = payload.events.filter((event) => {
+      if (event.sequence !== null && event.sequence <= resumeSequence) return false;
+      if (resolvedTurn === null || event.sequence === null) return true;
+      return !replayedEventKeysRef.current.has(
+        `${payload.match.id}:${resolvedTurn}:${event.sequence}`,
+      );
+    });
+    const markReplayComplete = () => {
+      if (resolvedTurn !== null && payload.last_sequence !== null) {
+        completedReplayCursorRef.current = {
+          turn: resolvedTurn,
+          sequence: payload.last_sequence,
+        };
+      }
+      for (const event of replayEvents) {
+        if (resolvedTurn !== null && event.sequence !== null) {
+          replayedEventKeysRef.current.add(
+            `${payload.match.id}:${resolvedTurn}:${event.sequence}`,
+          );
+        }
+      }
+    };
     if (!preMatch || payload.match.id !== preMatch.id) {
+      if (payload.resume && replayEvents.length > 0) {
+        clearPlans();
+        recordPlays(payload);
+        const playbackKey = responsePlaybackKey(payload);
+        if (processedPlaybackKeysRef.current.has(playbackKey)) {
+          commitMatch(payload.match);
+          return;
+        }
+        processedPlaybackKeysRef.current.add(playbackKey);
+        realtimePlaybackKeyRef.current = playbackKey;
+        try {
+          const result = await playTurn(
+            payload.resume.match,
+            replayEvents,
+            payload.match,
+            playbackKey,
+          );
+          if (result !== "busy") {
+            commitMatch(payload.match);
+            markReplayComplete();
+          }
+          if (payload.match.result.status !== "active") onBattleFinished();
+        } catch {
+          commitMatch(payload.match);
+          markReplayComplete();
+        } finally {
+          if (realtimePlaybackKeyRef.current === playbackKey) {
+            realtimePlaybackKeyRef.current = null;
+          }
+        }
+        return;
+      }
       commitMatch(payload.match);
       clearPlans();
       return;
@@ -392,7 +469,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
 
     const advanced =
       payload.match.turn > preMatch.turn || payload.match.status !== preMatch.status;
-    if (!advanced || payload.events.length === 0) {
+    if (!advanced || replayEvents.length === 0) {
       // Повторный WS-snapshot того же хода не должен стирать намерения игрока.
       if (payload.match.turn >= preMatch.turn) commitMatch(payload.match);
       return;
@@ -405,12 +482,16 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     processedPlaybackKeysRef.current.add(playbackKey);
     realtimePlaybackKeyRef.current = playbackKey;
     try {
-      const result = await playTurn(preMatch, payload.events, payload.match, playbackKey);
-      if (result !== "busy") commitMatch(payload.match);
+      const result = await playTurn(preMatch, replayEvents, payload.match, playbackKey);
+      if (result !== "busy") {
+        commitMatch(payload.match);
+        markReplayComplete();
+      }
       // V3: финал матча тоже приходит этим путём (клиент сам не резолвит).
       if (payload.match.result.status !== "active") onBattleFinished();
     } catch {
       commitMatch(payload.match);
+      markReplayComplete();
     } finally {
       if (realtimePlaybackKeyRef.current === playbackKey) {
         realtimePlaybackKeyRef.current = null;
@@ -451,20 +532,32 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   // любой результат (ранний по готовности или дедлайн) приходит сюда. ---
   React.useEffect(() => {
     if (!match) return undefined;
+    // PVP-6: терминальный матч не должен держать сокет/переподключаться после
+    // reload по старой battle-route.
+    if (match.status === "finished" || match.status === "expired") {
+      setRealtime("Realtime не подключен");
+      return undefined;
+    }
     const disconnect = connectMatchRealtime({
       matchId: match.id,
+      getResumeCursor: () => completedReplayCursorRef.current,
       onSnapshot: queueResolution,
       onUpdate: queueResolution,
       onStatus: setRealtime,
     });
     return disconnect;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match?.id]);
+  }, [match?.id, match?.status]);
 
   // WS ускоряет обновления, но не является единственным путём корректности:
   // при reconnect/error забираем состояние HTTP, пока сокет не подтвердит open.
   React.useEffect(() => {
-    if (!match || realtime === "Realtime подключен") return undefined;
+    if (
+      !match ||
+      match.status === "finished" ||
+      match.status === "expired" ||
+      realtime === "Realtime подключен"
+    ) return undefined;
     const refresh = () => {
       void getCombat(match.id).then(queueResolution).catch(() => undefined);
     };
@@ -545,6 +638,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     }
     const matchId = match.id;
     const turn = match.turn;
+    if (!planDirtyRef.current) return undefined;
     const timer = window.setTimeout(() => {
       const placements: Placement[] = planned
         .filter((p): p is PlannedUnit => p.kind === "unit")
@@ -568,6 +662,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     try {
       const res = await startCombat();
       commitMatch(res.match);
+      planDirtyRef.current = false;
       setPlanned([]);
       setSelected(null);
       // V8: журнал живёт в рамках одного матча.
@@ -575,6 +670,8 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
       setLogHighlight(null);
       playLogTurnsRef.current.clear();
       processedPlaybackKeysRef.current.clear();
+      replayedEventKeysRef.current.clear();
+      completedReplayCursorRef.current = null;
       responseQueueRef.current = Promise.resolve();
       setIsReady(false);
     } finally {
@@ -608,7 +705,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     if (!card) return false;
     if (plannedCost + card.cost > (viewer?.mana ?? 0)) return false;
     if (!isValidTarget(card, row, col)) return false;
-    setPlanned((cur) => [
+    setLocalPlan((cur) => [
       ...cur,
       card.card_type === "spell"
         ? { kind: "spell", card_id: card.id, row, col }
@@ -626,7 +723,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     // план. Проверяем раньше выбранной карты, чтобы клик не выглядел как
     // безрезультатный отказ из-за занятой клетки.
     if (plannedAt(row, col)) {
-      setPlanned((current) =>
+      setLocalPlan((current) =>
         current.filter((plan) => plan.row !== row || plan.col !== col),
       );
       return;
@@ -1184,7 +1281,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                           className="plan-summary-remove"
                           disabled={busy || isAnimating || isFinished || isReady}
                           onClick={() =>
-                            setPlanned((cur) => cur.filter((_, i) => i !== index))
+                            setLocalPlan((cur) => cur.filter((_, i) => i !== index))
                           }
                         >
                           ×
@@ -1197,7 +1294,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                   className="ghost-btn plan-summary-clear"
                   disabled={busy || isAnimating || isFinished || isReady}
                   onClick={() => {
-                    setPlanned([]);
+                    setLocalPlan([]);
                     setSelected(null);
                   }}
                 >

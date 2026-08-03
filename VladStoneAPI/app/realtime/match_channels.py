@@ -54,6 +54,7 @@ class MatchChannelManager:
         *,
         events: list | None = None,
         resolved_turn: int | None = None,
+        resume_from_sequence: int = 0,
     ) -> None:
         self._enqueue(
             match.id,
@@ -65,6 +66,7 @@ class MatchChannelManager:
                     viewer_id=self._viewer_id_for(match.id, websocket),
                     events=events,
                     resolved_turn=resolved_turn,
+                    resume_from_sequence=resume_from_sequence,
                 ),
             },
         )

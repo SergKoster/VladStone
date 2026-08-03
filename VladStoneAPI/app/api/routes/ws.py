@@ -20,7 +20,22 @@ EXTERNAL_ENVIRONMENTS = {"production", "staging"}
 
 
 @router.websocket("/matches/{match_id}")
-async def match_websocket(websocket: WebSocket, match_id: str) -> None:
+async def match_websocket(
+    websocket: WebSocket,
+    match_id: str,
+    resume_turn: int | None = None,
+    resume_from_sequence: int = 0,
+) -> None:
+    settings = get_settings()
+    # WebSocket не проходит через обычный CORS middleware. Во внешней среде
+    # cookie-authenticated snapshot разрешаем только origin фронтенда; invite
+    # token не является правом подключиться к боевому сокету.
+    if (
+        settings.environment in EXTERNAL_ENVIRONMENTS
+        and websocket.headers.get("origin") not in settings.cors_origins
+    ):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     with SessionLocal() as db:
         record = get_combat_match_record(db, match_id)
         if record is None:
@@ -29,7 +44,7 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
 
         refresh_token = websocket.cookies.get("refresh_token")
         user = get_user_by_refresh_token(db, refresh_token) if refresh_token else None
-        if get_settings().environment in EXTERNAL_ENVIRONMENTS and user is None:
+        if settings.environment in EXTERNAL_ENVIRONMENTS and user is None:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         participant = (
@@ -67,6 +82,14 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
         if viewer_id is None:
             humans = [player for player in match.players if not player.is_bot]
             viewer_id = humans[0].id if humans else None
+        # Курсор валиден только для ленты последнего завершённого хода. Иначе
+        # reconnect начинает replay с начала и не может пропустить факты другого
+        # хода из-за устаревшего URL/клиентского состояния.
+        snapshot_resume_sequence = (
+            resume_from_sequence
+            if resume_turn == match.last_resolved_turn
+            else 0
+        )
 
     # Ленивый дорезолв на reconnect — такой же серверный факт, как дорезолв
     # HTTP/воркером. Сначала сообщаем уже подключённым клиентам, затем новый
@@ -87,6 +110,7 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
             resolved_turn=(
                 resolved.resolved_turn if resolved is not None else match.last_resolved_turn
             ),
+            resume_from_sequence=snapshot_resume_sequence,
         )
         while True:
             incoming = await websocket.receive()

@@ -78,6 +78,10 @@ class BattleStateV4(BaseModel):
     # терять реплей, если HTTP-ответ или живой WS-broadcast его не достигли.
     last_resolved_turn: int | None = Field(default=None, ge=1)
     last_events: list[EngineEvent] = Field(default_factory=list)
+    # PVP-6: полный server-side снимок ДО последнего резолва. В payload он
+    # сериализуется per-viewer только как resume-старт анимации; колоды остаются
+    # секретом в state и никогда не уходят клиенту целиком.
+    last_turn_start: dict | None = None
     # V3 — интент-стриминг (ARCH §5.2): последний присланный план каждого
     # игрока; дедлайн резолвит ЕГО, а не пустой ход. Готовность — список id;
     # ready_since ставится, когда готовы ВСЕ люди: спустя BOT_READY_DELAY_
@@ -249,6 +253,13 @@ def resolve_v4_turn(
     """
     checked_at = _as_utc(now or datetime.now(UTC))
     resolved_turn = state.turn
+    # Снимок нужен reconnect-клиенту, который пропустил WS-ленту. Исключаем
+    # прежний resume и уже законченную ленту, чтобы JSON состояния не рос от
+    # хода к ходу: для старта анимации нужны только собственно match-данные.
+    state.last_turn_start = state.model_dump(
+        mode="json",
+        exclude={"last_turn_start", "last_events", "last_resolved_turn"},
+    )
     ctx = build_context(state, rng=rng)
     submitted = dict(human_intents_by_player or {})
     if human_intents is not None:

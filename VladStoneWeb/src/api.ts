@@ -238,6 +238,12 @@ export type CombatResponse = {
   resolved_turn: number | null;
   /** Последняя sequence полной ленты; часть ключа дедупликации HTTP/WS. */
   last_sequence: number | null;
+  /** PVP-6: viewer-safe начало последнего хода для догоняющего replay. */
+  resume: {
+    match: CombatMatch;
+    /** Последнее событие этого хода, уже показанное текущему WS-клиенту. */
+    resume_from_sequence: number;
+  } | null;
 };
 
 export type MatchInviteResponse = {
@@ -397,8 +403,14 @@ export function resolveCombat(
   });
 }
 
-export function createMatchSocket(matchId: string) {
-  return createWebSocket(`/ws/matches/${matchId}`);
+export function createMatchSocket(
+  matchId: string,
+  resume: { turn: number; sequence: number } | null = null,
+) {
+  const query = resume
+    ? `?resume_turn=${encodeURIComponent(resume.turn)}&resume_from_sequence=${encodeURIComponent(resume.sequence)}`
+    : "";
+  return createWebSocket(`/ws/matches/${matchId}${query}`);
 }
 
 export function logClientEvent(event: string, payload: Record<string, unknown>) {
