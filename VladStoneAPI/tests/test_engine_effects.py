@@ -40,6 +40,7 @@ from app.domain.combat.engine import (
     spawn_unit,
     validate_spell_script,
 )
+from app.domain.combat.engine.content import DECK_CARD_IDS_V4
 from app.domain.combat.engine.statuses import STATUS_POISON
 from app.domain.combat.models import HeroState, PlayerSide, PlayerState
 
@@ -334,6 +335,19 @@ def test_draw_card_respects_hand_cap() -> None:
 
     p1.hand = [f"c{i}" for i in range(HAND_CAP)]
     assert apply_effect(DrawCard(), ctx, caster_id="p1") == []  # E3: рука полна
+
+
+def test_draw_card_effect_rebuilds_an_empty_live_v4_deck() -> None:
+    ctx = make_ctx()
+    p1 = ctx.player_by_id("p1")
+    p1.deck, p1.hand = [], []
+    ctx.deck_card_ids = tuple(DECK_CARD_IDS_V4)
+
+    events = apply_effect(DrawCard(), ctx, caster_id="p1")
+
+    assert [event.kind for event in events] == ["card_drawn"]
+    assert set(p1.deck + p1.hand) == set(DECK_CARD_IDS_V4)
+    assert "samurai_koster" in p1.deck + p1.hand
 
 
 def test_modify_mana_clamps_and_supports_mana_theft() -> None:

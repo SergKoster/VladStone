@@ -23,7 +23,6 @@
 from collections.abc import Callable
 
 from app.domain.combat.board import mana_gain_for_turn
-from app.domain.combat.deck import draw_card
 from app.domain.combat.engine.abilities import TriggerHook
 from app.domain.combat.engine.apply import (
     HAND_CAP,
@@ -35,6 +34,7 @@ from app.domain.combat.engine.apply import (
     select_targets,
 )
 from app.domain.combat.engine.cards import CardType
+from app.domain.combat.engine.deck import draw_v4_card
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.patterns import forward_direction
 from app.domain.combat.engine.stances import Stance
@@ -686,9 +686,8 @@ def _draw_and_mana(
 ) -> list[EngineEvent]:
     events: list[EngineEvent] = []
     for player in ctx.players:
-        # Участник без deck-цикла (скриптовый бот MVP) не добирает.
-        if (player.deck or player.hand) and len(player.hand) < HAND_CAP:
-            if draw_card(player) is not None:
+        if len(player.hand) < HAND_CAP:
+            if draw_v4_card(player, card_ids=ctx.deck_card_ids) is not None:
                 events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
         before = player.mana
         player.mana = min(ctx.mana_cap, player.mana + mana_gain(turn + 1))

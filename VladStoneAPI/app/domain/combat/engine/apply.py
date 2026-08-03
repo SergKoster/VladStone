@@ -16,9 +16,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.domain.combat.deck import draw_card
 from app.domain.combat.engine.abilities import SpellScript
 from app.domain.combat.engine.cards import CardDefinition, CardType
+from app.domain.combat.engine.deck import draw_v4_card
 from app.domain.combat.engine.effects import (
     ApplyStatus,
     BuffStats,
@@ -136,6 +136,9 @@ class EffectContext:
     blueprints: dict[str, UnitBlueprint]
     cards: dict[str, CardDefinition] = field(default_factory=dict)
     spells: dict[str, SpellScript] = field(default_factory=dict)
+    # Live v4 передаёт свой decklist; None сохраняет no-op для изолированных
+    # тестовых/скриптовых контекстов без deck-cycle.
+    deck_card_ids: tuple[str, ...] | None = None
     mana_cap: int = 10
     # Счётчик токенов матча — детерминированные id призванных юнитов.
     token_seq: int = 0
@@ -632,11 +635,7 @@ def _draw_card(effect: DrawCard, ctx: EffectContext, *, caster_id: str) -> list[
             # Кэп руки (E3): полная рука — добор пропущен, карта не сгорает.
             if len(player.hand) >= HAND_CAP:
                 break
-            # Участник без deck-цикла (скриптовый бот MVP): добор — no-op,
-            # иначе перетасовка выдала бы ему колоду из воздуха.
-            if not player.deck and not player.hand:
-                break
-            if draw_card(player) is None:
+            if draw_v4_card(player, card_ids=ctx.deck_card_ids) is None:
                 break
             events.append(_event(ctx, kind="card_drawn", player_id=player.id, amount=1))
     return events

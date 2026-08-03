@@ -20,6 +20,7 @@ from app.domain.combat.engine.bot import plan_bot_intents
 from app.domain.combat.engine.content import (
     BLUEPRINTS,
     CARDS,
+    DECK_CARD_IDS_V4,
     SPELLS,
     V4_COLS,
     V4_ROWS,
@@ -97,6 +98,7 @@ def build_context(state: BattleStateV4) -> EffectContext:
         blueprints=dict(BLUEPRINTS),
         cards=dict(CARDS),
         spells=dict(SPELLS),
+        deck_card_ids=tuple(DECK_CARD_IDS_V4),
         mana_cap=state.mana_cap,
         token_seq=state.token_seq,
     )

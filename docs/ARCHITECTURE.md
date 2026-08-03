@@ -278,6 +278,10 @@ CORS/куки-боль (фронт собирается с `VITE_API_BASE_URL=/a
   apply_status, change_stance, spawn_token, push, kill_if, draw_card,
   modify_mana, grant_tag…). Карта комбинирует известные примитивы —
   произвольного кода на карту нет (ключ к отказоустойчивости).
+- **Цикл колоды v4**: `EffectContext.deck_card_ids` получает decklist конкретного
+  live-матча. Пустая колода пересобирается из карт этого списка вне текущей
+  руки; `None` допустим только в изолированных тестовых/скриптовых контекстах
+  без deck-cycle. Поэтому v4 никогда не обращается к legacy `DECK_CARD_IDS`.
 - **`TargetSelector{area, side_filter, tag_filter?, …}`**: area — CellPattern/
   вся доска/клетка; `side_filter` по умолчанию **any** (friendly fire по
   дефолту, E2); карты сужают (enemy/ally/по тегу). Заклинания таргетят по

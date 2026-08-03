@@ -40,6 +40,19 @@ def test_new_battle_has_towers_hands_and_deterministic_coin() -> None:
     assert again.spell_coin == state.spell_coin
 
 
+def test_v4_empty_deck_and_hand_rebuilds_from_the_full_v4_pool() -> None:
+    state = make_battle()
+    human = human_of(state)
+    human.deck, human.hand = [], []
+
+    events = resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human.id))
+
+    assert any(event.kind == "card_drawn" and event.player_id == human.id for event in events)
+    assert len(human.hand) == 1
+    assert set(human.deck + human.hand) == set(DECK_CARD_IDS_V4)
+    assert "samurai_koster" in human.deck + human.hand
+
+
 def towers_of_state(state, player_id):
     from app.domain.combat.engine.battle import build_context
 
