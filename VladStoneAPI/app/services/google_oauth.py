@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import base64
-import json
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
 import httpx
+from google.auth import exceptions as google_auth_exceptions
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2.id_token import verify_oauth2_token
 
 from app.core.config import Settings
 
@@ -61,13 +62,17 @@ def exchange_code_for_claims(settings: Settings, code: str) -> GoogleClaims:
     if not id_token:
         raise GoogleOAuthError("Google token response has no id_token")
 
-    claims = _decode_id_token_payload(id_token)
-    # The id_token arrives straight from Google over TLS in a server-to-server
-    # exchange, so the channel itself proves who minted it; verifying the JWT
-    # signature against Google's JWKS would only re-prove that. Audience and
-    # issuer are still checked to reject tokens minted for another app.
-    if claims.get("aud") != settings.google_oauth_client_id:
-        raise GoogleOAuthError("id_token audience mismatch")
+    try:
+        # google-auth downloads Google's public certs and validates signature,
+        # audience and expiry before exposing claims. TLS alone only protects
+        # the transport to token exchange; it does not validate the JWT.
+        claims = verify_oauth2_token(
+            id_token,
+            GoogleRequest(),
+            audience=settings.google_oauth_client_id,
+        )
+    except (ValueError, google_auth_exceptions.GoogleAuthError) as error:
+        raise GoogleOAuthError("id_token verification failed") from error
     if claims.get("iss") not in GOOGLE_ISSUERS:
         raise GoogleOAuthError("id_token issuer mismatch")
     subject = claims.get("sub")
@@ -79,12 +84,3 @@ def exchange_code_for_claims(settings: Settings, code: str) -> GoogleClaims:
         email=email,
         email_verified=bool(claims.get("email_verified")),
     )
-
-
-def _decode_id_token_payload(id_token: str) -> dict:
-    try:
-        payload_segment = id_token.split(".")[1]
-        padded = payload_segment + "=" * (-len(payload_segment) % 4)
-        return json.loads(base64.urlsafe_b64decode(padded))
-    except (IndexError, ValueError) as error:
-        raise GoogleOAuthError("id_token is not a valid JWT") from error

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.api.routes import auth as auth_routes
 from app.core.config import get_settings
 from app.main import create_app
+from app.services import google_oauth
 from app.services.google_oauth import GoogleClaims, GoogleOAuthError
 
 
@@ -144,3 +145,55 @@ def test_google_callback_handles_exchange_failure(
 
     assert "auth_error=google" in callback.headers["location"]
     assert client.get("/api/me").status_code == 401
+
+
+def test_exchange_verifies_google_id_token(
+    google_configured, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class TokenResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict:
+            return {"id_token": "signed.google.jwt"}
+
+    monkeypatch.setattr(google_oauth.httpx, "post", lambda *args, **kwargs: TokenResponse())
+    verified: dict[str, object] = {}
+
+    def verify(id_token, request, audience):
+        verified.update(id_token=id_token, request=request, audience=audience)
+        return {
+            "iss": "https://accounts.google.com",
+            "sub": "subject",
+            "email": "verified@example.com",
+            "email_verified": True,
+        }
+
+    monkeypatch.setattr(google_oauth, "verify_oauth2_token", verify)
+
+    claims = google_oauth.exchange_code_for_claims(google_configured, "auth-code")
+
+    assert claims == GoogleClaims("subject", "verified@example.com", True)
+    assert verified["id_token"] == "signed.google.jwt"
+    assert verified["audience"] == "test-client-id"
+
+
+def test_exchange_rejects_unverifiable_google_id_token(
+    google_configured, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class TokenResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict:
+            return {"id_token": "forged.jwt"}
+
+    monkeypatch.setattr(google_oauth.httpx, "post", lambda *args, **kwargs: TokenResponse())
+    monkeypatch.setattr(
+        google_oauth,
+        "verify_oauth2_token",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("bad signature")),
+    )
+
+    with pytest.raises(GoogleOAuthError, match="verification failed"):
+        google_oauth.exchange_code_for_claims(google_configured, "auth-code")
