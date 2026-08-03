@@ -769,10 +769,10 @@ COMBAT_REWORK §23.1.
     официальные `iss`. Тесты подменяют verifier, включая отказ для
     неподписанного token. `azp` потребуется, если появится несколько client
     ids; текущая конфигурация принимает ровно один.
-22. **Python-зависимости production не зафиксированы — release/reproducibility**
-    (аудит 15 июля 2026): `pyproject.toml` задаёт только нижние границы, CI и
-    Docker каждый раз выполняют новый `pip install`, поэтому одинаковый commit
-    может собрать другой набор транзитивных версий или внезапно перестать
-    собираться. Frontend уже имеет `package-lock.json`. **Фикс:** генерируемый
-    lock/constraints с hashes для Python; CI и Docker ставят ровно его;
-    Dependabot/Renovate обновляет отдельными проверяемыми PR.
+22. **Python-зависимости production — закрыто** (август 2026):
+    `requirements.lock` генерируется из `pyproject.toml` через
+    `pip-compile --all-extras --generate-hashes --output-file=requirements.lock
+    pyproject.toml`. CI и Docker устанавливают только этот hash-verified набор;
+    код импортируется из рабочей директории без повторного dependency-resolve.
+    Обновление зависимостей — отдельный проверяемый commit с регенерацией
+    lock-файла.

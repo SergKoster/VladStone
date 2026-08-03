@@ -25,8 +25,9 @@
       send-timeout и отключение при переполнении (ARCH §8.19).
 - [ ] Проверять Google ID token библиотекой/JWKS: подпись, `aud`, `iss`, `exp`
       (ARCH §8.21).
-- [ ] Зафиксировать воспроизводимый Python dependency set для CI и prod-образа
-      (ARCH §8.22).
+- [x] Зафиксировать воспроизводимый Python dependency set для CI и prod-образа
+      (`VladStoneAPI/requirements.lock`, hash-verified install; август 2026;
+      ARCH §8.22).
 
 ## Фаза 0 — Сделано (MVP боя)
 
