@@ -48,6 +48,16 @@ async def match_websocket(websocket: WebSocket, match_id: str) -> None:
         else:
             match = load_v4_battle(record)
 
+    # Ленивый дорезолв на reconnect — такой же серверный факт, как дорезолв
+    # HTTP/воркером. Сначала сообщаем уже подключённым клиентам, затем новый
+    # сокет получит тот же envelope своим snapshot.
+    if resolved is not None:
+        await match_channel_manager.broadcast_match_update(
+            resolved.state,
+            events=resolved.events,
+            resolved_turn=resolved.resolved_turn,
+        )
+
     await match_channel_manager.connect(match_id, websocket)
     try:
         await match_channel_manager.send_snapshot(
