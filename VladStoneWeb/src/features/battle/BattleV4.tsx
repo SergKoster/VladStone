@@ -61,6 +61,7 @@ const INSPECTOR_EDGE_PX = 8;
 const INSPECTOR_GAP_PX = 10;
 const INSPECTOR_WIDTH_PX = 224;
 const INSPECTOR_MAX_HEIGHT_PX = 280;
+const LOCAL_PLAN_STORAGE_PREFIX = "vladstone:combat-plan:";
 
 type InspectorPlacement =
   | { side: "right"; left: number; top: number }
@@ -95,6 +96,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const [match, setMatch] = React.useState<CombatMatch | null>(null);
   const matchRef = React.useRef<CombatMatch | null>(null);
   const [planned, setPlanned] = React.useState<Planned[]>([]);
+  const plannedRef = React.useRef<Planned[]>([]);
   const [selected, setSelected] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [resultDismissed, setResultDismissed] = React.useState(false);
@@ -141,10 +143,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   // парой (resolved turn, sequence) при reconnect/resume.
   const replayedEventKeysRef = React.useRef(new Set<string>());
   const completedReplayCursorRef = React.useRef<{ turn: number; sequence: number } | null>(null);
-  // До первого реального действия после reload пустой локальный `planned` не
-  // имеет права перезаписать server-stored plan debounce-запросом.
+  // План хранится и отправляется сразу при каждом действии: refresh между
+  // кликом и ответом API не должен потерять расстановку.
   const planDirtyRef = React.useRef(false);
   const responseQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const planRequestQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const consumeResolutionRef = React.useRef<(payload: CombatResponse) => Promise<void>>(
     async () => undefined,
   );
@@ -156,9 +159,66 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const detailSourceRef = React.useRef<HTMLElement | null>(null);
   const [detail, setDetail] = React.useState<CombatDetail | null>(null);
 
+  function planStorageKey(matchId: string, turn: number) {
+    return `${LOCAL_PLAN_STORAGE_PREFIX}${matchId}:${turn}`;
+  }
+
+  function removeStoredPlan(matchId: string, turn: number) {
+    window.sessionStorage.removeItem(planStorageKey(matchId, turn));
+  }
+
+  function storedPlan(matchId: string, turn: number): Planned[] | null {
+    try {
+      const parsed: unknown = JSON.parse(
+        window.sessionStorage.getItem(planStorageKey(matchId, turn)) ?? "null",
+      );
+      if (!Array.isArray(parsed)) return null;
+      const valid = parsed.every(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          (item.kind === "unit" || item.kind === "spell") &&
+          typeof item.card_id === "string" &&
+          typeof item.row === "number" &&
+          typeof item.col === "number",
+      );
+      return valid ? parsed as Planned[] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function queuePlanSync(matchToSync: CombatMatch, nextPlan: Planned[]) {
+    const placements: Placement[] = nextPlan
+      .filter((plan): plan is PlannedUnit => plan.kind === "unit")
+      .map(({ card_id, row, col }) => ({ card_id, row, col }));
+    const spells: SpellCast[] = nextPlan
+      .filter((plan): plan is PlannedSpell => plan.kind === "spell")
+      .map(({ card_id, row, col }) => ({ card_id, row, col }));
+    // Запросы сериализованы: быстрые изменения плана не могут доехать на
+    // сервер в обратном порядке и восстановить устаревшую расстановку.
+    planRequestQueueRef.current = planRequestQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await planCombat(matchToSync.id, matchToSync.turn, placements, spells);
+      })
+      .catch(() => undefined);
+  }
+
   function setLocalPlan(next: React.SetStateAction<Planned[]>) {
+    const current = plannedRef.current;
+    const nextPlan = typeof next === "function" ? next(current) : next;
     planDirtyRef.current = true;
-    setPlanned(next);
+    plannedRef.current = nextPlan;
+    const currentMatch = matchRef.current;
+    if (currentMatch?.status === "planning") {
+      window.sessionStorage.setItem(
+        planStorageKey(currentMatch.id, currentMatch.turn),
+        JSON.stringify(nextPlan),
+      );
+      queuePlanSync(currentMatch, nextPlan);
+    }
+    setPlanned(nextPlan);
   }
 
   // V8: клиентский журнал розыгрышей. Серверный match.log в v4 пуст; журнал
@@ -232,6 +292,24 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     const prev = matchRef.current;
     if (!prev || nextMatch.id !== prev.id || nextMatch.turn > prev.turn) {
       planDirtyRef.current = false;
+      plannedRef.current = [];
+      if (prev && nextMatch.id === prev.id) {
+        removeStoredPlan(prev.id, prev.turn);
+      }
+      const viewerReady = nextMatch.players.find(
+        (player) => player.id === nextMatch.viewer_id,
+      )?.ready;
+      const recoveredPlan = nextMatch.status === "planning" && !viewerReady
+        ? storedPlan(nextMatch.id, nextMatch.turn)
+        : null;
+      if (recoveredPlan) {
+        plannedRef.current = recoveredPlan;
+        planDirtyRef.current = true;
+        setPlanned(recoveredPlan);
+        queuePlanSync(nextMatch, recoveredPlan);
+      } else {
+        setPlanned([]);
+      }
     }
     if (!prev || nextMatch.id !== prev.id) {
       processedPlaybackKeysRef.current.clear();
@@ -400,6 +478,9 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const consumeResolution = React.useCallback(async (payload: CombatResponse) => {
     const clearPlans = () => {
       planDirtyRef.current = false;
+      plannedRef.current = [];
+      const currentMatch = matchRef.current;
+      if (currentMatch) removeStoredPlan(currentMatch.id, currentMatch.turn);
       setPlanned([]);
       setSelected(null);
       setIsReady(false); // V3: новый ход — готовность снята
@@ -430,40 +511,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
       }
     };
     if (!preMatch || payload.match.id !== preMatch.id) {
-      if (payload.resume && replayEvents.length > 0) {
-        clearPlans();
-        recordPlays(payload);
-        const playbackKey = responsePlaybackKey(payload);
-        if (processedPlaybackKeysRef.current.has(playbackKey)) {
-          commitMatch(payload.match);
-          return;
-        }
-        processedPlaybackKeysRef.current.add(playbackKey);
-        realtimePlaybackKeyRef.current = playbackKey;
-        try {
-          const result = await playTurn(
-            payload.resume.match,
-            replayEvents,
-            payload.match,
-            playbackKey,
-          );
-          if (result !== "busy") {
-            commitMatch(payload.match);
-            markReplayComplete();
-          }
-          if (payload.match.result.status !== "active") onBattleFinished();
-        } catch {
-          commitMatch(payload.match);
-          markReplayComplete();
-        } finally {
-          if (realtimePlaybackKeyRef.current === playbackKey) {
-            realtimePlaybackKeyRef.current = null;
-          }
-        }
-        return;
-      }
+      // После полного reload не задерживаем игрока длинным replay старого
+      // хода: сервер уже закончил его, поэтому сразу принимаем финальный state.
+      // Resume-курсор всё равно запоминается и не даст WS повторить ленту.
       commitMatch(payload.match);
-      clearPlans();
+      if (payload.resume) markReplayComplete();
       return;
     }
 
@@ -630,28 +682,6 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     secondsLeft,
   ]);
 
-  // V3: интент-стриминг — последний план уезжает на сервер с debounce;
-  // дедлайн применит именно его. После «Готов» план заморожен и уже отправлен.
-  React.useEffect(() => {
-    if (!match || match.status !== "planning" || isAnimating || isFinished || isReady) {
-      return undefined;
-    }
-    const matchId = match.id;
-    const turn = match.turn;
-    if (!planDirtyRef.current) return undefined;
-    const timer = window.setTimeout(() => {
-      const placements: Placement[] = planned
-        .filter((p): p is PlannedUnit => p.kind === "unit")
-        .map(({ card_id, row, col }) => ({ card_id, row, col }));
-      const spells: SpellCast[] = planned
-        .filter((p): p is PlannedSpell => p.kind === "spell")
-        .map(({ card_id, row, col }) => ({ card_id, row, col }));
-      // Ошибки не критичны: следующий debounce или «Готов» перешлют план.
-      void planCombat(matchId, turn, placements, spells).catch(() => undefined);
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [planned, match?.id, match?.turn, match?.status, isAnimating, isFinished, isReady]);
-
   React.useEffect(() => {
     if (isFinished) setResultDismissed(false);
   }, [isFinished]);
@@ -663,6 +693,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
       const res = await startCombat();
       commitMatch(res.match);
       planDirtyRef.current = false;
+      plannedRef.current = [];
       setPlanned([]);
       setSelected(null);
       // V8: журнал живёт в рамках одного матча.
@@ -818,6 +849,9 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     const nextReady = !isReady;
     setBusy(true);
     try {
+      // Не даём старому queued `/plan` приехать ПОСЛЕ атомарного `/ready` и
+      // заменить финальный план устаревшей версией.
+      await planRequestQueueRef.current.catch(() => undefined);
       await readyCombat(match.id, match.turn, nextReady, placements, spells);
       setIsReady(nextReady);
     } catch {

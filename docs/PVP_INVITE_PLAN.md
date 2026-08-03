@@ -304,12 +304,14 @@ human-vs-human `BattleStateV4`; два конкурирующих join не за
 server-side снимок начала хода без рекурсивного роста state. HTTP и WS отдают
 viewer-safe `resume {match, resume_from_sequence}` рядом с полной лентой;
 чужая рука не попадает и в resume-снимок. WS принимает cursor только для
-`last_resolved_turn`, а фронт дедуплицирует факты по `(turn, sequence)`,
-проигрывает пропущенный ход с начала после reload и не перезаписывает
-server-stored plan пустым debounce до первого явного изменения игрока.
+`last_resolved_turn`, а фронт дедуплицирует факты по `(turn, sequence)`.
+Новый план немедленно сохраняется на сервер и в `sessionStorage`; после
+reload во время planning он восстанавливается и досылается, если запрос был
+прерван. Reload во время playback сразу показывает актуальный server-state,
+не задерживая вход проигрыванием уже прошедшей анимации.
 Finished/expired матч закрывает realtime/polling вместо вечного reconnect.
 Регрессии покрывают HTTP/WS cursor и viewer-safe resume; локальный браузерный
-smoke reload проиграл сохранённую ленту без console errors.
+smoke проверяет сохранение плана при reload и быстрый вход без console errors.
 
 Файлы: payload/state событий, `ws.py`, `matchRealtime.ts`, `BattleV4.tsx`,
 интеграционные тесты; точный контракт уже описан в ARCHITECTURE §5.2/§8.15.
@@ -317,10 +319,10 @@ smoke reload проиграл сохранённую ленту без console e
 - [x] Snapshot начала последнего хода + events этого хода +
   `resume_from_sequence`; дедуп `(turn, sequence)`.
 - [x] Перезагрузка во время planning восстанавливает match, ready-state и
-  server-stored plan. Клиент может не восстановить визуальный локальный план,
-  но не затирает его пустым debounce до явного действия пользователя.
-- [x] Перезагрузка во время playback догоняет события и затем переходит к финальному
-  состоянию без второго резолва.
+  визуальный локальный план: он записывается в `sessionStorage` и сразу
+  отправляется серверу при каждом изменении.
+- [x] Перезагрузка во время playback сразу открывает актуальное финальное
+  состояние без второго резолва и без ожидания старой анимации.
 - [x] Expired/cancelled/finished lobby не остаётся «активным» и не создаёт вечный
   reconnect loop.
 - [x] Audit-события `match.invite_created/joined/cancelled/expired` пишутся без
