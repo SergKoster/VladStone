@@ -1,6 +1,7 @@
 """Контент-пак v4 (этап 15б): 12 карт §14.1 как данные, валидные и играбельные."""
 
 from app.domain.combat.engine import (
+    TOWER_HP,
     EffectContext,
     add_towers,
     plan_bot_intents,
@@ -90,4 +91,4 @@ def test_full_content_bot_match_survives_thirty_turns() -> None:
         for player in ctx.players
         for tower in towers_of(ctx, player.id)
     ]
-    assert any(hp < 20 for hp in tower_hp) or winner_team_by_towers(ctx) is not None
+    assert any(hp < TOWER_HP for hp in tower_hp) or winner_team_by_towers(ctx) is not None

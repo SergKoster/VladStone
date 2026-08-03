@@ -1,6 +1,6 @@
 """Башни v4 (§17): 5 юнитов-башен на игрока за краем поля + винкон.
 
-Решения владельца (июль 2026): HP башни — 20 (крутится на плейтесте, O10);
+Решения владельца: HP башни — 10 (август 2026; балансируется в O10);
 башни стоят на «призрачных» клетках за краем (ряд −1 у верхнего игрока,
 ряд rows у нижнего) — встать туда нельзя, снос клетку не открывает; юниты
 бьют башни обычной атакой (башня = юнит с тегами structure/tower/immovable).
@@ -17,8 +17,8 @@ from app.domain.combat.engine.tags import TAG_IMMOVABLE, TAG_STRUCTURE, TAG_TOWE
 from app.domain.combat.engine.units import UnitBlueprint, UnitState, UnitStats, spawn_unit
 from app.domain.combat.models import PlayerSide, PlayerState
 
-# Стартовые числа башни — заглушки под плейтест (O10).
-TOWER_HP = 20
+# Стартовые числа башни — ручки баланса для плейтеста (O10).
+TOWER_HP = 10
 TOWER_DAMAGE = 1
 TOWER_BLUEPRINT_ID = "tower_default"
 
