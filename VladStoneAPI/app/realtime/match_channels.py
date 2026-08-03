@@ -1,28 +1,42 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
+from dataclasses import dataclass
 
 from fastapi import WebSocket
-from starlette.websockets import WebSocketState
 
 from app.domain.combat.engine.battle import BattleStateV4
 from app.domain.combat.engine.payload import v4_combat_response
 from app.services.combat_matches import expired_match_payload
 
+OUTBOUND_QUEUE_SIZE = 8
+SEND_TIMEOUT_SECONDS = 3
+
+
+@dataclass
+class _Connection:
+    queue: asyncio.Queue[dict]
+    sender_task: asyncio.Task[None]
+
 
 class MatchChannelManager:
     def __init__(self) -> None:
-        self._connections: dict[str, set[WebSocket]] = defaultdict(set)
+        self._connections: dict[str, dict[WebSocket, _Connection]] = defaultdict(dict)
 
     async def connect(self, match_id: str, websocket: WebSocket) -> None:
         await websocket.accept()
-        self._connections[match_id].add(websocket)
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=OUTBOUND_QUEUE_SIZE)
+        sender_task = asyncio.create_task(self._send_loop(match_id, websocket, queue))
+        self._connections[match_id][websocket] = _Connection(queue, sender_task)
 
     def disconnect(self, match_id: str, websocket: WebSocket) -> None:
         sockets = self._connections.get(match_id)
         if sockets is None:
             return
-        sockets.discard(websocket)
+        connection = sockets.pop(websocket, None)
+        if connection is not None and connection.sender_task is not asyncio.current_task():
+            connection.sender_task.cancel()
         if not sockets:
             self._connections.pop(match_id, None)
 
@@ -34,7 +48,9 @@ class MatchChannelManager:
         events: list | None = None,
         resolved_turn: int | None = None,
     ) -> None:
-        await websocket.send_json(
+        self._enqueue(
+            match.id,
+            websocket,
             {
                 "type": "match.snapshot",
                 **v4_combat_response(
@@ -42,11 +58,14 @@ class MatchChannelManager:
                     events=events,
                     resolved_turn=resolved_turn,
                 ),
-            }
+            },
         )
 
     async def send_pong(self, websocket: WebSocket) -> None:
-        await websocket.send_json({"type": "pong"})
+        for match_id, sockets in self._connections.items():
+            if websocket in sockets:
+                self._enqueue(match_id, websocket, {"type": "pong"})
+                return
 
     async def broadcast_match_update(
         self,
@@ -72,17 +91,47 @@ class MatchChannelManager:
         await self._broadcast(match_id, payload)
 
     async def _broadcast(self, match_id: str, payload: dict) -> None:
-        disconnected: list[WebSocket] = []
-        for websocket in list(self._connections.get(match_id, set())):
-            if websocket.application_state != WebSocketState.CONNECTED:
-                disconnected.append(websocket)
-                continue
-            try:
-                await websocket.send_json(payload)
-            except RuntimeError:
-                disconnected.append(websocket)
-        for websocket in disconnected:
+        for websocket in list(self._connections.get(match_id, {})):
+            self._enqueue(match_id, websocket, payload)
+
+    def _enqueue(self, match_id: str, websocket: WebSocket, payload: dict) -> None:
+        connection = self._connections.get(match_id, {}).get(websocket)
+        if connection is None:
+            return
+        try:
+            connection.queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            # Нечитающий клиент не имеет права тормозить commit/broadcast для
+            # остальных. Закрываем его асинхронно, не ожидая сетевой операции.
             self.disconnect(match_id, websocket)
+            asyncio.create_task(self._close_slow_socket(websocket))
+
+    async def _send_loop(
+        self,
+        match_id: str,
+        websocket: WebSocket,
+        queue: asyncio.Queue[dict],
+    ) -> None:
+        try:
+            while True:
+                payload = await queue.get()
+                await asyncio.wait_for(
+                    websocket.send_json(payload),
+                    timeout=SEND_TIMEOUT_SECONDS,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            asyncio.create_task(self._close_slow_socket(websocket))
+        finally:
+            self.disconnect(match_id, websocket)
+
+    @staticmethod
+    async def _close_slow_socket(websocket: WebSocket) -> None:
+        try:
+            await asyncio.wait_for(websocket.close(code=1013), timeout=1)
+        except Exception:
+            pass
 
 
 match_channel_manager = MatchChannelManager()

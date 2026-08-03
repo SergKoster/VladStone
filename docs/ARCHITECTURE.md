@@ -755,27 +755,16 @@ COMBAT_REWORK §23.1.
     изолированный MVP combat domain остаётся только для его регрессионных
     тестов, не участвует в live-маршрутах. Возвышение отключено в UI и API
     согласно R9; исторические DB-колонки пока сохраняются до решения O2.
-19. **WS broadcast без backpressure — High к PvP/нагрузке** (аудит 15 июля
-    2026): `MatchChannelManager._broadcast` последовательно делает
-    `await websocket.send_json` для каждого сокета без timeout и без очереди.
-    Медленный/зависший клиент задерживает остальных участников; HTTP resolve
-    уже закоммичен, но не возвращает ответ до broadcast, а timer-worker
-    рассылает матчи последовательно и может задержать все следующие матчи.
-    Обрабатывается только `RuntimeError`, не общий timeout/disconnect. **Фикс:**
-    bounded per-connection outbound queue + отдельный sender task, send-timeout,
-    disconnect при переполнении/ошибке; HTTP/DB commit не ждёт медленного клиента;
-    нагрузочный тест с не читающим WS-клиентом.
-20. **Нет лимитов на combat/WS input — частично закрыто** (август 2026):
-    15 июля 2026): `ResolveTurnRequest.placements/spells` — списки без `max_length`,
-    строки/координаты почти не ограничены; Caddy/FastAPI не задают общий body
-    limit. WS принимает произвольный JSON без лимита сообщения. Это позволяет
-    тратить память/CPU ещё до доменной валидации, а вместе с анонимным
-    `/combat/start` (§8.9) доступно без аккаунта. **Фикс:** лимит request body на
-    proxy/app, строгие Pydantic bounds (длина id, координаты, максимум intents
-    не больше физического лимита руки), WS max message size и rate limit;
-   Введены Pydantic bounds на id/координаты и максимум 6 placement/spell
-   intents, WS закрывает не-JSON и сообщения свыше 4 KiB. До public release
-   остаётся общий body-limit на proxy/app и интеграционные 413/429-тесты.
+19. **WS broadcast без backpressure — закрыто для текущего процесса** (август
+    2026): у каждого подключения есть ограниченная outbound queue и отдельный
+    sender task с send-timeout. Переполненный или сломанный сокет отключается,
+    поэтому HTTP/DB commit и timer-worker не ждут медленного клиента. Есть
+    регрессионный тест не читающего сокета. Перед multi-instance PvP понадобится
+    общий pub/sub transport (ARCH §8.4).
+20. **Лимиты combat/WS input — частично закрыто** (август 2026): введены
+    Pydantic bounds на id/координаты и максимум 6 placement/spell intents; WS
+    закрывает не-JSON и сообщения свыше 4 KiB. До public release остаётся общий
+    body-limit на proxy/app и интеграционные 413/429-тесты.
 21. **Проверка Google ID token — закрыто** (август 2026): вместо ручного
     base64 decode используется `google-auth`. Он проверяет подпись по Google
     public certs, audience и срок token; код дополнительно допускает только
