@@ -58,7 +58,7 @@ BOLT_CARD = CardDefinition(
 
 
 def test_default_tower_hp_matches_current_balance_decision() -> None:
-    assert TOWER_HP == 10
+    assert TOWER_HP == 20
 
 
 def make_player(player_id, side, team):
