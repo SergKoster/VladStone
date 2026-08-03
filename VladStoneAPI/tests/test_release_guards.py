@@ -28,3 +28,15 @@ def test_combat_rejects_oversized_intent_lists() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_external_client_telemetry_is_disabled(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "environment", "production")
+
+    response = TestClient(create_app()).post(
+        "/api/telemetry/client-events",
+        json={"event": "battle_test_event", "payload": {}},
+    )
+
+    assert response.status_code == 404
