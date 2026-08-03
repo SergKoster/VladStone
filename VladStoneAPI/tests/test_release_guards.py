@@ -40,3 +40,12 @@ def test_external_client_telemetry_is_disabled(monkeypatch) -> None:
     )
 
     assert response.status_code == 404
+
+
+def test_http_request_body_limit_runs_before_route_parsing() -> None:
+    response = TestClient(create_app()).post(
+        "/api/telemetry/client-events",
+        json={"event": "battle_test_event", "payload": {"data": "x" * (16 * 1024)}},
+    )
+
+    assert response.status_code == 413

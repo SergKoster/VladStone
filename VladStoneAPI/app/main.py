@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.request_limits import RequestBodyLimitMiddleware
 from app.api.routes import auth, combat, health, me, telemetry, ws
 from app.core.config import get_settings
 from app.db.session import init_db
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestBodyLimitMiddleware)
     app.include_router(health.router, prefix=settings.api_prefix)
     app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(me.router, prefix=settings.api_prefix)

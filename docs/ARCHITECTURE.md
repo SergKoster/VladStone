@@ -763,8 +763,9 @@ COMBAT_REWORK §23.1.
     общий pub/sub transport (ARCH §8.4).
 20. **Лимиты combat/WS input — частично закрыто** (август 2026): введены
     Pydantic bounds на id/координаты и максимум 6 placement/spell intents; WS
-    закрывает не-JSON и сообщения свыше 4 KiB. До public release остаётся общий
-    body-limit на proxy/app и интеграционные 413/429-тесты.
+    закрывает не-JSON и сообщения свыше 4 KiB; ASGI отбрасывает HTTP body свыше
+    16 KiB до JSON/Pydantic разбора. До public release остаётся общий limiter
+    между инстансами и интеграционные 429-тесты.
 21. **Проверка Google ID token — закрыто** (август 2026): вместо ручного
     base64 decode используется `google-auth`. Он проверяет подпись по Google
     public certs, audience и срок token; код дополнительно допускает только
