@@ -37,7 +37,7 @@ import {
   type LungeEffect,
 } from "./battleAnimations";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
-import { responsePlaybackKey } from "./turnPlayback";
+import { phaseLabel, responsePlaybackKey } from "./turnPlayback";
 import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
@@ -126,6 +126,7 @@ export function BattleV4({
     dyingIds,
     isAnimating,
     lunges,
+    phaseEvent,
     playTurn,
     popups,
     spawningIds,
@@ -1283,6 +1284,11 @@ export function BattleV4({
           <div className="turn-plate">
             <strong>Ход {visibleMatch.turn}</strong>
             <span>Рука: {viewer?.hand_count ?? 0}</span>
+            {phaseLabel(phaseEvent) ? (
+              <span aria-live="polite" className="battle-phase">
+                {phaseLabel(phaseEvent)}
+              </span>
+            ) : null}
           </div>
           {/* U3: стопка колоды вместо текста; счётчик убывает по кадрам
               реплея (deck_count в event snapshot), рубашка летит на доборе. */}

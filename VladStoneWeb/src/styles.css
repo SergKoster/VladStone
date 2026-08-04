@@ -882,6 +882,13 @@ nav {
   font-weight: 700;
 }
 
+.turn-plate .battle-phase {
+  color: #6f3aa9;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .mana-bar {
   position: relative;
   height: 26px;
