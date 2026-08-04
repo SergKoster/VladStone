@@ -159,7 +159,7 @@ nav {
    остальные страницы (.page, max-width 1120px) не трогаем. */
 .content-battle {
   padding: 20px 24px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .page {
@@ -386,7 +386,7 @@ nav {
   align-items: stretch;
   max-width: 1100px;
   min-height: calc(100dvh - 56px);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .battle-stage {
