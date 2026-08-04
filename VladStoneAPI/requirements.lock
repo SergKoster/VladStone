@@ -301,7 +301,8 @@ google-auth==2.56.2 \
     --hash=sha256:c8270ea95b2697b74e3d8438ae9c5b898e38b623b915c7b5c5635921e7de68a6 \
     --hash=sha256:e28f103ca8091fb7012b99c44243d7366c29863713b8e34a220c3322b7a07051
     # via vladstone-api (pyproject.toml)
-greenlet==3.5.4 \
+greenlet==3.2.5 \
+    --hash=sha256:c816554eb33e7ecf9ba4defcb1fd8c994e59be6b4110da15480b3e7447ea4286 \
     --hash=sha256:0232ae1de90a8e07867bb127d7a6ba2301e859145489f25cda8a6096dabe1d20 \
     --hash=sha256:07bd44616608d873d06735b63ef1a88191d6ca57c8d291d6559c71bc14c0893c \
     --hash=sha256:08fc36de8442d5c3e95b044550dbea9bf144d31ec0cc58e36fb241cb6ef6a994 \
@@ -328,6 +329,7 @@ greenlet==3.5.4 \
     --hash=sha256:3ef964f56dfcb6f9bbef2a190d9126795eac408716aeae47b5e7c73c32aafca9 \
     --hash=sha256:41ddab54e4b238f4a6c323f39b4e59e176affd5a94d461a9fb7583dac74240a3 \
     --hash=sha256:42afdc1ab5f66da8c586c32af9224a74a706b4f0ea0dc3a4188a0860a09c65c9 \
+    --hash=sha256:45fcea7b697b91290b36eafc12fff479aca6ba6500d98ef6f34d5634c7119cbe \
     --hash=sha256:4ab9f0704bccf6d3b38e0d2130b7b33271cff11453690da074fa280c3aa8e8e7 \
     --hash=sha256:57aa201b351f7c7c75627c60d29e4d5b97a07d37efeb62b903466fca42c097d7 \
     --hash=sha256:58023945f421093de5e6fa108c0985a8659d43f49e0216da25099369a121bcbd \
@@ -1068,6 +1070,9 @@ uvicorn[standard]==0.52.1 \
     --hash=sha256:112ec661814189acbccd3f7b86460147cc065fc92c0821afa78918780e4354dd \
     --hash=sha256:e4403f9d93188cf9d1088e9f40e3acd12630e2df8675316704379a7fc20fff6a
     # via vladstone-api (pyproject.toml)
+uvloop==0.22.1 ; sys_platform != "win32" \
+    --hash=sha256:7b5b1ac819a3f946d3b2ee07f09149578ae76066d70b44df3fa990add49a82e4
+    # via uvicorn
 watchfiles==1.2.0 \
     --hash=sha256:01859b11fd9fbca670f4d5da00fbac282cfea9bd67a2125d8b2833a3b5617ea9 \
     --hash=sha256:01ea8d66f0693b9b60a6541c8d10263091ca9a9060d242f3c1f3143f9aad2c98 \

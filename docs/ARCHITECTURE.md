@@ -798,7 +798,9 @@ COMBAT_REWORK §23.1.
 22. **Python-зависимости production — закрыто** (август 2026):
     `requirements.lock` генерируется из `pyproject.toml` через
     `pip-compile --all-extras --generate-hashes --output-file=requirements.lock
-    pyproject.toml`. CI и Docker устанавливают только этот hash-verified набор;
+    pyproject.toml` в Linux-окружении, совпадающем с production. Это важно для
+    platform-specific зависимостей (например, `uvicorn[standard]` → `uvloop` на
+    Linux). CI и Docker устанавливают только этот hash-verified набор;
     код импортируется из рабочей директории без повторного dependency-resolve.
     Обновление зависимостей — отдельный проверяемый commit с регенерацией
     lock-файла.
