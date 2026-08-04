@@ -1576,6 +1576,9 @@ nav {
 
 .unit-layer-v4 .unit-token {
   z-index: 2;
+  /* Поле, обычные токены и башни используют один визуальный размер: 90% от
+     ячейки сетки. Так контур токена не кажется крупнее плитки или башни. */
+  padding: 5%;
   /* Tokens are focusable for the read-only W1c inspector. Click is forwarded
      to the cell, so spell targeting keeps its existing behaviour until W1d. */
   pointer-events: auto;
@@ -1610,6 +1613,10 @@ nav {
   position: relative;
   display: grid;
   place-items: center;
+  width: 90%;
+  height: 90%;
+  align-self: center;
+  justify-self: center;
   padding: 0;
   border: 1px solid #cfdbd3;
   border-radius: 8px;
