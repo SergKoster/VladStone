@@ -6,11 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import CombatActiveSlot, CombatMatchRecord, User
+from app.db.models import CombatActiveSlot, CombatMatchRecord, QuickMatchmakingEntry, User
 from app.domain.combat.engine.battle import BattleStateV4
 from app.services.combat_matches import (
     ACTIVE_MATCH_STATUSES,
@@ -27,6 +27,7 @@ class AdmissionResult:
     record: CombatMatchRecord
     state: BattleStateV4 | None
     created: bool
+    blocked_user_id: int | None = None
 
 
 class ActiveMatchExists(Exception):
@@ -54,23 +55,53 @@ class BattleAdmissionService:
         owner_user_id: int,
         build_state: Callable[[], BattleStateV4],
     ) -> AdmissionResult:
-        try:
-            slot = self._reserve_available_slot(user_id)
-        except ActiveMatchExists as existing:
-            return AdmissionResult(record=existing.record, state=None, created=False)
+        return self.admit_new_match_for_users(
+            user_ids=[user_id],
+            owner_user_id=owner_user_id,
+            build_state=build_state,
+        )
 
+    def admit_new_match_for_users(
+        self,
+        *,
+        user_ids: list[int],
+        owner_user_id: int,
+        build_state: Callable[[], BattleStateV4],
+        preserve_queue_entries: bool = False,
+    ) -> AdmissionResult:
+        """Atomically claim every participant before creating a shared match."""
+        normalized_user_ids = sorted(set(user_ids))
+        self._lock_users(normalized_user_ids)
+        for user_id in normalized_user_ids:
+            current = self._current_record(user_id)
+            if current is not None:
+                return AdmissionResult(
+                    record=current,
+                    state=None,
+                    created=False,
+                    blocked_user_id=user_id,
+                )
+
+        slots = [self._reserve_available_slot(user_id) for user_id in normalized_user_ids]
         state = build_state()
         record = create_combat_match_record(
             self.db,
             match=state,
             owner_user_id=owner_user_id,
         )
-        slot.match_id = record.id
+        for slot in slots:
+            slot.match_id = record.id
+        if not preserve_queue_entries:
+            self.clear_waiting_queue_entries(normalized_user_ids)
         return AdmissionResult(record=record, state=state, created=True)
 
     def current_active_match(self, *, user_id: int) -> CombatMatchRecord | None:
         self._lock_users([user_id])
         return self._current_record(user_id)
+
+    def lock_users(self, user_ids: list[int]) -> None:
+        """Lock accounts in canonical order before a caller locks its own rows."""
+        self._lock_users(user_ids)
 
     def reserve_participant_slot(self, *, user_id: int, match_id: str) -> CombatActiveSlot:
         """Reserve a joining account before it becomes a match participant."""
@@ -83,7 +114,16 @@ class BattleAdmissionService:
             raise ActiveMatchExists(current)
         slot = self._reserve_available_slot(user_id)
         slot.match_id = match_id
+        self.clear_waiting_queue_entries([user_id])
         return slot
+
+    def clear_waiting_queue_entries(self, user_ids: list[int]) -> None:
+        self.db.execute(
+            delete(QuickMatchmakingEntry).where(
+                QuickMatchmakingEntry.user_id.in_(user_ids),
+                QuickMatchmakingEntry.status == "waiting",
+            )
+        )
 
     def _reserve_available_slot(self, user_id: int) -> CombatActiveSlot:
         self._lock_users([user_id])

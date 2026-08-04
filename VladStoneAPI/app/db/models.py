@@ -248,6 +248,40 @@ class CombatActiveSlot(Base):
     )
 
 
+class QuickMatchmakingEntry(Base):
+    """Durable FIFO queue entry; matched rows survive for cross-device handoff."""
+
+    __tablename__ = "quick_matchmaking_entries"
+    __table_args__ = (
+        Index(
+            "ix_quick_matchmaking_waiting_joined_at",
+            "joined_at",
+            postgresql_where=text("status = 'waiting'"),
+            sqlite_where=text("status = 'waiting'"),
+        ),
+    )
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), default="waiting", index=True)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    matched_match_id: Mapped[str | None] = mapped_column(
+        ForeignKey("combat_matches.id"), nullable=True, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    __mapper_args__ = {"version_id_col": revision}
+
+
 class MatchInviteRecord(Base):
     """Single-use invitation capability. Only its SHA-256 digest is persisted."""
 

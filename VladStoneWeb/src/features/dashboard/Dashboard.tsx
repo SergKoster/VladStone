@@ -7,6 +7,7 @@ export function Dashboard({
   message,
   onInvite,
   onPlay,
+  onQuick,
 }: {
   coins: number;
   collectionCount: number;
@@ -14,6 +15,7 @@ export function Dashboard({
   message?: string;
   onInvite: () => void;
   onPlay: () => void;
+  onQuick: () => void;
 }) {
   return (
     <div className="page">
@@ -23,14 +25,15 @@ export function Dashboard({
           <p>{t.battleRules}</p>
         </div>
         <div className="dashboard-actions">
-          <button onClick={onPlay}>{t.play}</button>
-          <button className="secondary" onClick={onInvite}>Пригласить друга</button>
+          <button onClick={onPlay}>Бой с ИИ</button>
+          <button className="secondary" onClick={onInvite}>Бой с другом</button>
+          <button className="secondary" onClick={onQuick}>Быстрый бой</button>
         </div>
       </header>
       <section className="metrics">
         <Metric label={t.coins} value={String(coins)} />
         <Metric label={t.collectionProgress} value={`${collectionCount} / ${collectionTotal}`} />
-        <Metric label="Режим" value="PvE bot" />
+        <Metric label="Режим" value="Выбери бой" />
       </section>
       {message ? <p className="dashboard-message">{message}</p> : null}
     </div>

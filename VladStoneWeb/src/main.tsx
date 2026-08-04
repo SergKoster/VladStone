@@ -29,6 +29,7 @@ import { BattleV4 } from "./features/battle/BattleV4";
 import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { CreatedInviteLobby, JoinInvite, PENDING_INVITE_ROUTE_KEY } from "./features/invite/InviteLobby";
+import { QuickMatch } from "./features/matchmaking/QuickMatch";
 import { Profile } from "./features/profile/Profile";
 import { HandleOnboarding } from "./features/profile/HandleOnboarding";
 import { t } from "./i18n";
@@ -215,6 +216,17 @@ function App() {
     [setRoute],
   );
 
+  async function handleQuickMatched(matchId: string) {
+    const active = await getActiveCombats()
+      .then((payload) => payload.matches.find((match) => match.id === matchId) ?? null)
+      .catch(() => null);
+    if (active) {
+      openExistingMatch(active);
+    } else {
+      setRoute({ page: "battle", matchId });
+    }
+  }
+
   async function handleCreateInvite() {
     setInviteMessage("");
     try {
@@ -331,6 +343,7 @@ function App() {
             collectionTotal={catalog.length}
             onInvite={() => void handleCreateInvite()}
             onPlay={() => setRoute("battle")}
+            onQuick={() => setRoute("quick")}
             message={inviteMessage}
           />
         )}
@@ -364,6 +377,12 @@ function App() {
             onBack={() => setRoute("dashboard")}
             onExistingMatch={openExistingMatch}
             onJoined={(matchId) => setRoute({ page: "battle", matchId })}
+          />
+        )}
+        {route.page === "quick" && (
+          <QuickMatch
+            onBack={() => setRoute("dashboard")}
+            onMatched={(matchId) => void handleQuickMatched(matchId)}
           />
         )}
         {route.page === "profile" && (

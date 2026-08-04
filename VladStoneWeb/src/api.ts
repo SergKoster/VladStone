@@ -270,6 +270,11 @@ export type MatchLobbyResponse = {
   invite: { expires_at: string; status: string };
 };
 
+export type QuickMatchmakingStatus = {
+  status: "idle" | "waiting" | "matched";
+  match_id: string | null;
+};
+
 export type MatchSocketMessage =
   | ({ type: "match.snapshot" | "match.updated" } & CombatResponse)
   | { type: "pong" };
@@ -389,6 +394,18 @@ export function getMatchLobby(matchId: string) {
 
 export function cancelMatchInvite(matchId: string) {
   return request<void>(`/matches/${matchId}/invite`, { method: "DELETE" });
+}
+
+export function joinQuickMatchmaking() {
+  return request<QuickMatchmakingStatus>("/matchmaking/quick", { method: "POST" });
+}
+
+export function getQuickMatchmakingStatus() {
+  return request<QuickMatchmakingStatus>("/matchmaking/quick");
+}
+
+export function cancelQuickMatchmaking() {
+  return request<QuickMatchmakingStatus>("/matchmaking/quick", { method: "DELETE" });
 }
 
 // V3: интент-стриминг — сервер хранит последний план и применит его на

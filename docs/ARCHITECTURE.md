@@ -566,6 +566,18 @@ stale/ruleset-expired slot и захватывает `combat_active_slots` до 
 матчи newest-wins и помечает остальные `expired`; `/combat/active` сохраняет
 старый payload, но максимум с одной записью.
 
+**Быстрый бой реализован** (август 2026): `quick_matchmaking_entries`
+(`waiting|matched`, heartbeat, lease, optimistic `revision`, durable
+`matched_match_id`) обслуживает `POST/GET/DELETE /matchmaking/quick`.
+`quick_matchmaking.py` выбирает FIFO-пару c `FOR UPDATE SKIP LOCKED`, сначала
+блокирует accounts в каноническом порядке, затем queue rows, и через
+`BattleAdmissionService` создаёт сразу активный двухчеловеческий v4-матч.
+Запись `matched` остаётся для cross-device transfer; новый join после terminal
+match создаёт fresh waiting entry. Обычный PvE/invite admission удаляет
+waiting-entry в той же транзакции, поэтому очередь не обходит active-slot.
+Клиентский polling замедляется в скрытой вкладке и при `matched` открывает
+канонический `match_id`.
+
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
 - **Матч = N участников в командах**: у `PlayerState` есть `team` (сторона поля

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.request_limits import RequestBodyLimitMiddleware
-from app.api.routes import auth, combat, health, matches, me, profiles, telemetry, ws
+from app.api.routes import auth, combat, health, matches, matchmaking, me, profiles, telemetry, ws
 from app.core.config import get_settings
 from app.db.session import init_db
 from app.services.combat_timer_worker import run_combat_timer_worker
@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(profiles.router, prefix=settings.api_prefix)
     app.include_router(combat.router, prefix=settings.api_prefix)
     app.include_router(matches.router, prefix=settings.api_prefix)
+    app.include_router(matchmaking.router, prefix=settings.api_prefix)
     app.include_router(telemetry.router, prefix=settings.api_prefix)
     app.include_router(ws.router)
     return app

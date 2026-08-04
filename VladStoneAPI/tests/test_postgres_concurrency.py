@@ -15,6 +15,7 @@ from app.main import create_app
 from app.services.battle_admission import BattleAdmissionService
 from app.services.combat_matches import create_combat_match_record
 from app.services.profiles import HandleUnavailable, set_profile_handle
+from app.services.quick_matchmaking import get_quick_matchmaking_status, join_quick_matchmaking
 
 
 def test_skip_locked_uses_two_real_postgres_transactions() -> None:
@@ -131,3 +132,38 @@ def test_parallel_pve_admission_keeps_one_current_match() -> None:
             )
         )
         assert len(slots) == 1 and slots[0].match_id == resolved[0][0]
+
+
+def test_parallel_quick_join_transfers_one_fifo_match() -> None:
+    if engine.dialect.name != "postgresql":
+        pytest.skip("requires TEST_DATABASE_URL pointing to PostgreSQL")
+
+    create_app()
+    with SessionLocal.begin() as session:
+        users = [User(email=f"quick-race-{uuid4().hex}@example.com") for _ in range(2)]
+        session.add_all(users)
+        session.flush()
+        user_ids = [user.id for user in users]
+
+    barrier = Barrier(2)
+
+    def join_from_tab(user_id: int) -> dict:
+        with SessionLocal() as session:
+            barrier.wait(timeout=5)
+            payload = join_quick_matchmaking(session, user_id=user_id)
+            session.commit()
+            return payload
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = [
+            executor.submit(join_from_tab, user_ids[0]),
+            executor.submit(join_from_tab, user_ids[1]),
+        ]
+        [future.result(timeout=5) for future in outcomes]
+
+    with SessionLocal() as session:
+        first = get_quick_matchmaking_status(session, user_id=user_ids[0])
+        second = get_quick_matchmaking_status(session, user_id=user_ids[1])
+        session.commit()
+    assert first["status"] == second["status"] == "matched"
+    assert first["match_id"] == second["match_id"]

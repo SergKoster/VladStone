@@ -94,6 +94,36 @@ p {
   padding: 28px;
 }
 
+.quick-match-page {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.quick-match-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid #d4ddd6;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.quick-match-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: #8c9990;
+}
+
+.quick-match-dot.searching {
+  background: #2d7cd3;
+  box-shadow: 0 0 0 4px rgb(45 124 211 / 18%);
+}
+
 .profile-private-note {
   color: #66746b;
 }

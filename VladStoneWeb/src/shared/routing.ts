@@ -5,10 +5,11 @@ export type AppRoute =
   | { page: StaticRoute }
   | { page: "profile"; handle?: string }
   | { page: "battle"; matchId?: string }
+  | { page: "quick" }
   | { page: "invite"; token: string }
   | { page: "lobby"; matchId: string };
 
-export type RouteTarget = StaticRoute | "battle" | AppRoute;
+export type RouteTarget = StaticRoute | "battle" | "quick" | AppRoute;
 
 const staticRoutes: StaticRoute[] = ["dashboard", "collection"];
 
@@ -34,6 +35,7 @@ function readHashRoute(defaultRoute: StaticRoute): AppRoute {
   const route = window.location.hash.replace(/^#\/?/, "");
   const [page, value] = route.split("/", 2);
   if (page === "battle") return { page, matchId: validSegment(value) ? value : undefined };
+  if (page === "quick") return { page };
   if (page === "invite" && validSegment(value)) return { page, token: value };
   if (page === "lobby" && validSegment(value)) return { page, matchId: value };
   if (page === "profile") return { page, handle: validSegment(value) ? value : undefined };
@@ -42,6 +44,7 @@ function readHashRoute(defaultRoute: StaticRoute): AppRoute {
 
 function hashForRoute(route: AppRoute): string {
   if (route.page === "battle" && route.matchId) return `battle/${route.matchId}`;
+  if (route.page === "quick") return "quick";
   if (route.page === "invite") return `invite/${route.token}`;
   if (route.page === "lobby") return `lobby/${route.matchId}`;
   if (route.page === "profile" && route.handle) return `profile/${route.handle}`;
