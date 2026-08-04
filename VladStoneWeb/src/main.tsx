@@ -94,6 +94,18 @@ function App() {
   const catalog = catalogState.data.cards;
   const statusCatalog = catalogState.data.statuses;
 
+  // API may still be starting while Vite is already reachable. Do not leave
+  // the battle with an empty catalog forever after that first transient error:
+  // unknown hand cards would otherwise render as spell fallbacks and be
+  // impossible to plan.
+  React.useEffect(() => {
+    if (catalog.length > 0) return undefined;
+    const retry = window.setInterval(() => {
+      void catalogState.refresh().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(retry);
+  }, [catalog.length, catalogState.refresh]);
+
   async function handleRequestCode() {
     setAuthMessage("");
     try {
