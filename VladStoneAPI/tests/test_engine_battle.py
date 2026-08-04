@@ -93,12 +93,16 @@ def test_win_condition_when_all_enemy_towers_gone() -> None:
     assert state.status == MatchLifecycleStatus.FINISHED
     assert state.result.status == "finished"
     assert state.result.winner_team == 0  # команда человека
+    assert state.result.end_reason == "all_towers_destroyed"
     assert state.result.reward_coins == 5
 
 
-def test_judgement_decides_at_the_threshold_turn() -> None:
+def test_fiftieth_turn_resolves_fully_before_judgement() -> None:
     state = make_battle()
     state.turn = JUDGEMENT_TURN
+    human = human_of(state)
+    human.hand = ["test_bruiser"]
+    human.mana = 10
     # Ослабим одну башню бота — у человека «крепче слабейшая» при равном числе.
     from app.domain.combat.engine.battle import build_context
 
@@ -108,20 +112,43 @@ def test_judgement_decides_at_the_threshold_turn() -> None:
 
     apply_context(state, ctx)
 
-    events = resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human_of(state).id))
-    assert events == []  # на суде ходы не разыгрываются
+    events = resolve_v4_turn(
+        state,
+        human_intents=PlayerIntents(
+            player_id=human.id,
+            spawns=(SpawnIntent(card_id="test_bruiser", row=4, col=2),),
+        ),
+    )
+    assert any(event.kind == "spawned" for event in events)
     assert state.status == MatchLifecycleStatus.FINISHED
     assert state.result.winner_team == 0
+    assert state.result.end_reason == "judgement"
+
+
+def test_all_towers_destroyed_on_fiftieth_turn_beats_judgement() -> None:
+    state = make_battle()
+    state.turn = JUDGEMENT_TURN
+    from app.domain.combat.engine.battle import build_context
+
+    ctx = build_context(state)
+    bot_towers = towers_of(ctx, "p2")
+    state.units = [unit for unit in state.units if unit not in bot_towers]
+
+    resolve_v4_turn(state, human_intents=PlayerIntents(player_id=human_of(state).id))
+
+    assert state.status == MatchLifecycleStatus.FINISHED
+    assert state.result.winner_team == 0
+    assert state.result.end_reason == "all_towers_destroyed"
 
 
 def test_turn_timer_shrinks_from_turn_15_to_floor() -> None:
-    # DESIGN §3.5: база до 14-го хода, с 15-го −1 с за ход, пол 5 с.
+    # DESIGN §3.5: база до 14-го хода, с 15-го −1 с за ход, пол — server constant.
     assert turn_duration_seconds(1) == 30
     assert turn_duration_seconds(14) == 30
     assert turn_duration_seconds(15) == 29
     assert turn_duration_seconds(16) == 28
-    assert turn_duration_seconds(39) == 5
-    assert turn_duration_seconds(100) == 5  # пол держится
+    assert turn_duration_seconds(34) == 10
+    assert turn_duration_seconds(100) == 10  # пол держится
 
 
 def test_deadline_uses_compressed_turn_time_after_resolve() -> None:
@@ -141,8 +168,11 @@ def test_deadline_uses_compressed_turn_time_after_resolve() -> None:
 def test_payload_reports_planning_seconds() -> None:
     state = make_battle()
     assert v4_combat_response(state)["match"]["planning_seconds"] == 30
-    state.turn = 39
-    assert v4_combat_response(state)["match"]["planning_seconds"] == 5
+    state.turn = 34
+    payload = v4_combat_response(state)
+    assert payload["match"]["planning_seconds"] == 10
+    assert payload["match"]["result"]["end_reason"] is None
+    assert datetime.fromisoformat(payload["server_time"]).tzinfo is not None
 
 
 def test_towers_do_not_emit_unit_waited() -> None:

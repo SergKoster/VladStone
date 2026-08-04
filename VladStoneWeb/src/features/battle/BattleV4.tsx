@@ -287,6 +287,21 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   // руку в payload. Помеченная карта влетает в свой слот со стороны стопки.
   const [justDrawn, setJustDrawn] = React.useState<{ cardId: string } | null>(null);
   const justDrawnTimerRef = React.useRef<number | null>(null);
+  // The countdown advances from a server wall-clock sample on the browser's
+  // monotonic clock, so a local Date.now() skew cannot extend a server turn.
+  const serverClockRef = React.useRef<{ serverMs: number; observedAt: number } | null>(null);
+
+  const syncServerClock = React.useCallback((serverTime: string) => {
+    const serverMs = Date.parse(serverTime);
+    if (!Number.isNaN(serverMs)) {
+      serverClockRef.current = { serverMs, observedAt: performance.now() };
+    }
+  }, []);
+
+  const estimatedServerNow = React.useCallback(() => {
+    const anchor = serverClockRef.current;
+    return anchor ? anchor.serverMs + performance.now() - anchor.observedAt : Date.now();
+  }, []);
 
   const commitMatch = React.useCallback((nextMatch: CombatMatch) => {
     const prev = matchRef.current;
@@ -553,10 +568,11 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   consumeResolutionRef.current = consumeResolution;
 
   const queueResolution = React.useCallback((payload: CombatResponse) => {
+    syncServerClock(payload.server_time);
     responseQueueRef.current = responseQueueRef.current
       .catch(() => undefined)
       .then(() => consumeResolutionRef.current(payload));
-  }, []);
+  }, [syncServerClock]);
 
   // Восстановление на reload/возврате на вкладку: сервер остаётся источником
   // состояния, поэтому сначала ищем только свой активный матч, затем загружаем
@@ -639,19 +655,19 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     // анимации. Локальная шкала стартует сейчас, но не продлевает серверный срок.
     const displayDeadline = Math.min(
       Date.parse(match.planning_deadline),
-      Date.now() + planningSeconds * 1000,
+      estimatedServerNow() + planningSeconds * 1000,
     );
     const tick = () => {
       const left = Math.max(
         0,
-        Math.ceil((displayDeadline - Date.now()) / 1000),
+        Math.ceil((displayDeadline - estimatedServerNow()) / 1000),
       );
       setSecondsLeft(left);
     };
     tick();
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [isAnimating, match?.planning_deadline, match?.status, planningSeconds]);
+  }, [estimatedServerNow, isAnimating, match?.planning_deadline, match?.status, planningSeconds]);
 
   // V3: на нуле видимого таймера клиент авто-жмёт «Готов» (темп хода). Даже
   // если этот запрос проиграет гонку, серверный дедлайн сам применит

@@ -225,6 +225,8 @@ export type CombatMatch = {
   result: {
     /** "expired" — матч закрыт сервером (напр. сменились правила боя), не проигрыш. */
     status: "active" | "finished" | "expired";
+    /** Server-decided terminal cause; never inferred from local board state. */
+    end_reason: "all_towers_destroyed" | "judgement" | "surrender" | null;
     winner_id: string | null;
     winner_team: number | null;
     reward_coins: number;
@@ -232,6 +234,8 @@ export type CombatMatch = {
 };
 
 export type CombatResponse = {
+  /** Wall-clock timestamp captured by the authoritative combat server. */
+  server_time: string;
   match: CombatMatch;
   events: CombatEvent[];
   /** Ход, породивший events; не выводится клиентом косвенно из match.turn. */

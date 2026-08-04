@@ -484,8 +484,9 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
             acted = True
             continue
         # Коллизия: двое в одну пустую клетку (C4 гарантирует, что это
-        # единственный вид коллизии). Встречные — враги: размен ударами;
-        # оба остаются, шаг потрачен. При вертикальном движении претендентов
+        # единственный вид коллизии). Оба остаются, шаг потрачен. Урон наносит
+        # только участник с оставшейся атакой — и тратит её ровно один раз.
+        # При вертикальном движении претендентов
         # больше двух не бывает — если будущая механика (диагонали?) это
         # сломает, падаем громко, а не тихо теряем чей-то ход.
         if len(claimants) != 2:
@@ -505,18 +506,21 @@ def _run_single_iteration(ctx: EffectContext) -> tuple[bool, list[EngineEvent]]:
                 to_cell=cell,
             )
         )
-        for unit, other in ((first, second), (second, first)):
-            damage = effective_stats(other, ctx.blueprint_of(other)).damage
-            before = unit.current_hp
-            unit.current_hp -= damage
+        for attacker, target in ((first, second), (second, first)):
+            if attacker.remaining_attacks <= 0:
+                continue
+            attacker.remaining_attacks -= 1
+            damage = effective_stats(attacker, ctx.blueprint_of(attacker)).damage
+            before = target.current_hp
+            target.current_hp -= damage
             events.append(
                 _event(
                     ctx,
                     kind="damage",
-                    unit_id=unit.id,
+                    unit_id=target.id,
                     amount=damage,
                     before=before,
-                    after=unit.current_hp,
+                    after=target.current_hp,
                 )
             )
         acted = True

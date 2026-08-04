@@ -468,7 +468,7 @@ def test_c4_head_on_swap_is_blocked() -> None:
     assert (mine.row, theirs.row) == (2, 1)
 
 
-def test_collision_only_into_an_empty_cell_trades_damage() -> None:
+def test_collision_without_attacks_spends_steps_but_deals_no_damage() -> None:
     pacifist = make_blueprint(
         "pacifist", stats=UnitStats(hp=5, damage=2, attacks_per_turn=0, move_steps=1)
     )
@@ -478,9 +478,27 @@ def test_collision_only_into_an_empty_cell_trades_damage() -> None:
     events = resolve(ctx, turn=1)
     collisions = [event for event in events if event.kind == "collision"]
     assert len(collisions) == 1 and collisions[0].to_cell == (2, 1)
-    # Размен ударами, оба остались на местах.
-    assert mine.current_hp == 3 and theirs.current_hp == 3
+    # Без атак оба столкнулись, но не нанесли урон; шаги всё равно потрачены.
+    assert mine.current_hp == 5 and theirs.current_hp == 5
+    assert mine.remaining_steps == theirs.remaining_steps == 0
+    assert not [event for event in events if event.kind == "damage"]
     assert (mine.row, theirs.row) == (3, 1)
+
+
+def test_collision_spends_the_only_attack_budget() -> None:
+    duelist = make_blueprint(
+        "duelist", stats=UnitStats(hp=5, damage=2, attacks_per_turn=1, move_steps=1)
+    )
+    ctx = make_ctx(duelist)
+    mine = add_unit(ctx, uid="mine", owner="p1", row=3, col=1, bp="duelist")
+    theirs = add_unit(ctx, uid="theirs", owner="p2", row=1, col=1, bp="duelist")
+
+    events = resolve(ctx, turn=1)
+
+    assert len([event for event in events if event.kind == "collision"]) == 1
+    assert mine.current_hp == theirs.current_hp == 3
+    # После коллизии у юнита больше нет атаки для следующей обычной цели.
+    assert mine.remaining_attacks == theirs.remaining_attacks == 0
 
 
 def test_attack_first_priority_and_defense_never_moves() -> None:

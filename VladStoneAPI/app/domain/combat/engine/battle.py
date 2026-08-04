@@ -273,17 +273,16 @@ def resolve_v4_turn(
         if player.is_bot:
             intents.append(plan_bot_intents(ctx, player.id))
 
-    forced = state.turn >= JUDGEMENT_TURN
-    if forced:
-        events = []  # на суде ходы запрещены — исход решает лестница башен
-    else:
-        events = resolve_turn_v4(
-            ctx,
-            turn=state.turn,
-            spell_coin=state.spell_coin,
-            intents=intents,
-            mana_gain=v4_mana_gain,
-        )
+    # План 50-го хода обязан полностью разыграться. Суд наступает только
+    # ПОСЛЕ его результата; до этого момента суд не заменяет ход пустой лентой.
+    judgement_due_after_turn = state.turn >= JUDGEMENT_TURN
+    events = resolve_turn_v4(
+        ctx,
+        turn=state.turn,
+        spell_coin=state.spell_coin,
+        intents=intents,
+        mana_gain=v4_mana_gain,
+    )
     apply_context(state, ctx)
     state.last_resolved_turn = resolved_turn
     state.last_events = events
@@ -292,7 +291,13 @@ def resolve_v4_turn(
     state.ready_player_ids = []
     state.ready_since = None
 
-    _advance_turn_and_check_end(state, ctx, forced=forced, num_events=len(events), now=checked_at)
+    _advance_turn_and_check_end(
+        state,
+        ctx,
+        judgement_due_after_turn=judgement_due_after_turn,
+        num_events=len(events),
+        now=checked_at,
+    )
     return events
 
 
@@ -300,21 +305,24 @@ def _advance_turn_and_check_end(
     state: BattleStateV4,
     ctx: EffectContext,
     *,
-    forced: bool,
+    judgement_due_after_turn: bool,
     num_events: int,
     now: datetime,
 ) -> None:
     winner = winner_team_by_towers(ctx)
-    if forced or winner is not None or all_teams_eliminated(ctx):
-        if winner is None and not all_teams_eliminated(ctx):
-            # Дошли до суда без нокаута — лестница §17 решает исход.
-            winner = run_judgement(
-                {
-                    player.team: [t.current_hp for t in towers_of(ctx, player.id)]
-                    for player in state.players
-                }
-            )
-        _finish(state, winner)
+    if winner is not None or all_teams_eliminated(ctx):
+        # Уничтожение башен всегда приоритетнее суда, включая 50-й ход.
+        _finish(state, winner, end_reason="all_towers_destroyed")
+        return
+    if judgement_due_after_turn:
+        # Дошли до суда без нокаута — лестница §17 решает исход.
+        winner = run_judgement(
+            {
+                player.team: [t.current_hp for t in towers_of(ctx, player.id)]
+                for player in state.players
+            }
+        )
+        _finish(state, winner, end_reason="judgement")
         return
 
     state.turn += 1
@@ -327,12 +335,13 @@ def _advance_turn_and_check_end(
     )
 
 
-def _finish(state: BattleStateV4, winner_team: int | None) -> None:
+def _finish(state: BattleStateV4, winner_team: int | None, *, end_reason: str) -> None:
     state.status = MatchLifecycleStatus.FINISHED
     state.planning_deadline = None
     winners = [p for p in state.players if p.team == winner_team]
     human_won = any(not p.is_bot for p in winners)
     state.result.status = "finished"
+    state.result.end_reason = end_reason
     state.result.winner_team = winner_team
     state.result.winner_id = winners[0].id if len(winners) == 1 else None
     state.result.reward_coins = 5 if (winner_team is not None and human_won) else 1

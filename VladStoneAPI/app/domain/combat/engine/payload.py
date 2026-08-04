@@ -6,6 +6,8 @@ players/units/rows/cols/viewer_id + events. Анти-чит инварианты
 Юниты — в формате v4 (blueprint/стойка/статусы), клиент рисует по ним поле.
 """
 
+from datetime import UTC, datetime
+
 from app.domain.combat.engine.battle import BattleStateV4, build_context
 from app.domain.combat.engine.cards import CardType
 from app.domain.combat.engine.content import BLUEPRINTS, CARDS, V4_COLS, V4_ROWS
@@ -230,6 +232,9 @@ def v4_combat_response(
 
     client_events = translate_engine_events(events or [])
     return {
+        # One server timestamp is enough for the client to anchor its monotonic
+        # visual countdown. The deadline itself remains server-authoritative.
+        "server_time": datetime.now(UTC).isoformat(),
         "match": _match_payload(state, viewer_id=viewer_id),
         "events": [event.model_dump(mode="json") for event in client_events],
         "resolved_turn": resolved_turn,
