@@ -108,6 +108,8 @@ p {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   min-height: 100dvh;
 }
 
@@ -148,12 +150,16 @@ nav {
 .content {
   padding: 28px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 /* U2: маршрут боя — свой layout-модификатор (main.tsx): чуть меньше отступы,
    остальные страницы (.page, max-width 1120px) не трогаем. */
 .content-battle {
   padding: 20px 24px;
+  overflow: hidden;
 }
 
 .page {
@@ -2784,6 +2790,9 @@ nav {
 }
 
 @media (max-width: 720px) {
+  .content-battle {
+    overflow: auto;
+  }
   .battle-v4 {
     grid-template-columns: 1fr;
   }
