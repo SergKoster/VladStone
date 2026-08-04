@@ -1,7 +1,17 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -88,10 +98,41 @@ class PlayerProfile(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     nickname: Mapped[str] = mapped_column(String(32), default="Player")
+    onboarding_required: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="1",
+    )
     avatar_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     coins: Mapped[int] = mapped_column(Integer, default=0)
 
     user: Mapped[User] = relationship(back_populates="profile")
+
+
+class ProfileHandle(Base):
+    """Reserved, case-insensitive public handle history for canonical profiles."""
+
+    __tablename__ = "profile_handles"
+    __table_args__ = (
+        Index(
+            "uq_profile_handles_current_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_current"),
+            sqlite_where=text("is_current = 1"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    handle_key: Mapped[str] = mapped_column(String(25), unique=True, index=True)
+    display_handle: Mapped[str] = mapped_column(String(25))
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CardDefinition(Base):

@@ -1,15 +1,16 @@
 import React from "react";
 
-export type StaticRoute = "dashboard" | "collection" | "profile";
+export type StaticRoute = "dashboard" | "collection";
 export type AppRoute =
   | { page: StaticRoute }
+  | { page: "profile"; handle?: string }
   | { page: "battle"; matchId?: string }
   | { page: "invite"; token: string }
   | { page: "lobby"; matchId: string };
 
 export type RouteTarget = StaticRoute | "battle" | AppRoute;
 
-const staticRoutes: StaticRoute[] = ["dashboard", "collection", "profile"];
+const staticRoutes: StaticRoute[] = ["dashboard", "collection"];
 
 export function useHashRoute(defaultRoute: StaticRoute = "dashboard") {
   const [route, setRouteState] = React.useState<AppRoute>(() => readHashRoute(defaultRoute));
@@ -35,6 +36,7 @@ function readHashRoute(defaultRoute: StaticRoute): AppRoute {
   if (page === "battle") return { page, matchId: validSegment(value) ? value : undefined };
   if (page === "invite" && validSegment(value)) return { page, token: value };
   if (page === "lobby" && validSegment(value)) return { page, matchId: value };
+  if (page === "profile") return { page, handle: validSegment(value) ? value : undefined };
   return staticRoutes.includes(page as StaticRoute) ? { page: page as StaticRoute } : { page: defaultRoute };
 }
 
@@ -42,6 +44,7 @@ function hashForRoute(route: AppRoute): string {
   if (route.page === "battle" && route.matchId) return `battle/${route.matchId}`;
   if (route.page === "invite") return `invite/${route.token}`;
   if (route.page === "lobby") return `lobby/${route.matchId}`;
+  if (route.page === "profile" && route.handle) return `profile/${route.handle}`;
   return route.page;
 }
 

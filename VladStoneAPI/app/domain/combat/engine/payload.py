@@ -112,6 +112,7 @@ def _match_payload(state: BattleStateV4, *, viewer_id: str | None) -> dict:
                 "side": player.side.value,
                 "team": player.team,
                 "is_bot": player.is_bot,
+                "display_name": player.display_name or ("Бот" if player.is_bot else "Игрок"),
                 "mana": player.mana,
                 "ready": player.id in state.ready_player_ids,
                 "hand": list(player.hand) if player.id == viewer_id else [],

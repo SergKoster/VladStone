@@ -130,15 +130,21 @@ def create_v4_battle(
     *,
     match_id: str,
     user_id: int | None = None,
+    display_name: str | None = None,
     now: datetime | None = None,
     rng: random.Random | None = None,
 ) -> BattleStateV4:
     """Новый PvE-матч v4: человек p1 (низ) против бота p2 (верх), 5 башен у каждого."""
     started_at = _as_utc(now or datetime.now(UTC))
     human = create_participant(
-        player_id="p1", team=0, user_id=user_id, mana=v4_mana_gain(1)
+        player_id="p1",
+        team=0,
+        user_id=user_id,
+        mana=v4_mana_gain(1),
     )
+    human.display_name = display_name
     bot = create_participant(player_id="p2", team=1, is_bot=True, mana=v4_mana_gain(1))
+    bot.display_name = "Бот"
     deal_v4_hand(human, rng=rng)
     deal_v4_hand(bot, rng=rng)
 
@@ -157,7 +163,12 @@ def create_v4_battle(
     return state
 
 
-def create_v4_pvp_lobby(*, match_id: str, creator_user_id: int) -> BattleStateV4:
+def create_v4_pvp_lobby(
+    *,
+    match_id: str,
+    creator_user_id: int,
+    creator_display_name: str | None = None,
+) -> BattleStateV4:
     """Create an unplayable 1v1 lobby; activation starts the actual battle.
 
     The second human seat deliberately has no account, cards or towers yet.
@@ -167,6 +178,7 @@ def create_v4_pvp_lobby(*, match_id: str, creator_user_id: int) -> BattleStateV4
     creator = create_participant(
         player_id="p1", team=0, user_id=creator_user_id, mana=0
     )
+    creator.display_name = creator_display_name
     opponent = create_participant(player_id="p2", team=1, mana=0)
     return BattleStateV4(
         id=match_id,
@@ -180,6 +192,7 @@ def activate_v4_pvp_battle(
     state: BattleStateV4,
     *,
     opponent_user_id: int,
+    opponent_display_name: str | None = None,
     now: datetime | None = None,
 ) -> None:
     """Atomically turn a pending lobby into a playable two-human match."""
@@ -192,6 +205,7 @@ def activate_v4_pvp_battle(
     started_at = _as_utc(now or datetime.now(UTC))
     rng = random.Random(state.rng_seed)
     opponent.user_id = opponent_user_id
+    opponent.display_name = opponent_display_name
     for player in state.players:
         player.mana = v4_mana_gain(1)
         deal_v4_hand(player, rng=rng)

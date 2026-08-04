@@ -57,11 +57,16 @@ def create_match_invite(
     db: Session,
     *,
     creator_user_id: int,
+    creator_display_name: str | None = None,
     now: datetime | None = None,
 ) -> tuple[BattleStateV4, MatchInviteRecord, str]:
     created_at = _as_utc(now or datetime.now(UTC))
     match_id = f"pvp_{uuid4().hex}"
-    state = create_v4_pvp_lobby(match_id=match_id, creator_user_id=creator_user_id)
+    state = create_v4_pvp_lobby(
+        match_id=match_id,
+        creator_user_id=creator_user_id,
+        creator_display_name=creator_display_name,
+    )
     create_combat_match_record(db, match=state, owner_user_id=creator_user_id)
 
     token = secrets.token_urlsafe(32)
@@ -82,6 +87,7 @@ def join_match_invite(
     *,
     token: str,
     user_id: int,
+    display_name: str | None = None,
     now: datetime | None = None,
 ) -> BattleStateV4:
     """Accept an invite once; repeated request by its acceptor is idempotent."""
@@ -116,7 +122,12 @@ def join_match_invite(
     state = load_v4_battle(record)
     if state.status != MatchLifecycleStatus.WAITING_FOR_OPPONENT:
         raise InviteConflict("Match is no longer waiting")
-    activate_v4_pvp_battle(state, opponent_user_id=user_id, now=accepted_at)
+    activate_v4_pvp_battle(
+        state,
+        opponent_user_id=user_id,
+        opponent_display_name=display_name,
+        now=accepted_at,
+    )
     opponent = next(player for player in state.players if player.user_id == user_id)
     add_combat_match_participant(
         db,

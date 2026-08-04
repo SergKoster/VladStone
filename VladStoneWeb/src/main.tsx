@@ -8,15 +8,18 @@ import {
   type CombatCatalogCard,
   type CombatStatusDefinition,
   type CollectionCard,
+  type PublicProfileResponse,
   getAuthProviders,
   getCollection,
   getCombatCatalog,
   getMe,
+  getPublicProfile,
   createMatchInvite,
   googleDevLogin,
   googleLoginUrl,
   logout,
   requestEmailCode,
+  updateMyHandle,
   verifyEmailCode,
 } from "./api";
 import { AuthScreen } from "./features/auth/AuthScreen";
@@ -25,6 +28,7 @@ import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { CreatedInviteLobby, JoinInvite, PENDING_INVITE_ROUTE_KEY } from "./features/invite/InviteLobby";
 import { Profile } from "./features/profile/Profile";
+import { HandleOnboarding } from "./features/profile/HandleOnboarding";
 import { t } from "./i18n";
 import { useHashRoute } from "./shared/routing";
 import { useServerResource } from "./shared/serverState";
@@ -83,6 +87,12 @@ function App() {
     [authUser?.id],
     null,
   );
+  const publicHandle = route.page === "profile" ? route.handle : undefined;
+  const publicProfileState = useServerResource<PublicProfileResponse | null>(
+    () => (publicHandle ? getPublicProfile(publicHandle) : Promise.resolve(null)),
+    [publicHandle],
+    null,
+  );
   const collectionState = useServerResource<CollectionCard[]>(
     () => (authUser ? getCollection().then((payload) => payload.cards) : Promise.resolve([])),
     [authUser?.id],
@@ -102,6 +112,21 @@ function App() {
   const collection = collectionState.data;
   const catalog = catalogState.data.cards;
   const statusCatalog = catalogState.data.statuses;
+
+  React.useEffect(() => {
+    publicProfileState.setData(null);
+  }, [publicHandle]);
+
+  React.useEffect(() => {
+    if (
+      route.page === "profile" &&
+      route.handle &&
+      publicProfileState.data &&
+      route.handle !== publicProfileState.data.handle
+    ) {
+      setRoute({ page: "profile", handle: publicProfileState.data.handle });
+    }
+  }, [publicProfileState.data, route, setRoute]);
 
   // API may still be starting while Vite is already reachable. Do not leave
   // the battle with an empty catalog forever after that first transient error:
@@ -165,6 +190,18 @@ function App() {
     setRoute("dashboard");
   }
 
+  async function handleSetHandle(handle: string) {
+    const updated = await updateMyHandle(handle);
+    profileState.setData(updated);
+  }
+
+  async function handleRename(handle: string) {
+    const updated = await updateMyHandle(handle);
+    profileState.setData(updated);
+    publicProfileState.setData(null);
+    setRoute({ page: "profile", handle: updated.handle ?? undefined });
+  }
+
   async function handleCreateInvite() {
     setInviteMessage("");
     try {
@@ -187,6 +224,14 @@ function App() {
     return null;
   }
 
+  if (!authUser && route.page === "profile" && route.handle) {
+    return publicProfileState.data ? (
+      <main className="public-profile-shell">
+        <Profile profile={publicProfileState.data} />
+      </main>
+    ) : null;
+  }
+
   if (!authUser) {
     return (
       <AuthScreen
@@ -203,6 +248,11 @@ function App() {
         onVerifyCode={handleVerifyCode}
       />
     );
+  }
+
+  if (profile === null) return null;
+  if (profile.onboarding_required || !profile.handle) {
+    return <HandleOnboarding onSubmit={handleSetHandle} />;
   }
 
   return (
@@ -222,7 +272,10 @@ function App() {
           <NavButton active={route.page === "battle"} onClick={() => setRoute("battle")}>
             {t.battle}
           </NavButton>
-          <NavButton active={route.page === "profile"} onClick={() => setRoute("profile")}>
+          <NavButton
+            active={route.page === "profile"}
+            onClick={() => setRoute({ page: "profile", handle: profile.handle ?? undefined })}
+          >
             {t.profile}
           </NavButton>
         </nav>
@@ -293,9 +346,19 @@ function App() {
         )}
         {route.page === "profile" && (
           <Profile
-            createdAt={profile?.created_at}
-            email={profile?.email ?? authUser.email}
-            nickname={profile?.nickname ?? "Player"}
+            email={publicProfileState.data?.handle === profile.handle ? profile.email : undefined}
+            onRename={publicProfileState.data?.handle === profile.handle ? handleRename : undefined}
+            profile={
+              publicProfileState.data ?? {
+                handle: profile.handle,
+                avatar_key: null,
+                created_at: profile.created_at,
+                collection: {
+                  owned: new Set(collection.map((card) => card.id)).size,
+                  total: catalog.length,
+                },
+              }
+            }
           />
         )}
       </section>

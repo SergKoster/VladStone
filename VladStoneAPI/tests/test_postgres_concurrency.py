@@ -1,17 +1,19 @@
 """PostgreSQL-only proof for row locks used by future matchmaking services."""
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CombatMatchRecord
+from app.db.models import CombatMatchRecord, PlayerProfile, User
 from app.db.session import SessionLocal, engine
 from app.domain.combat.engine.battle import create_v4_battle
 from app.main import create_app
 from app.services.combat_matches import create_combat_match_record
+from app.services.profiles import HandleUnavailable, set_profile_handle
 
 
 def test_skip_locked_uses_two_real_postgres_transactions() -> None:
@@ -31,9 +33,7 @@ def test_skip_locked_uses_two_real_postgres_transactions() -> None:
     def hold_lock() -> None:
         with SessionLocal.begin() as session:
             locked = session.scalar(
-                select(CombatMatchRecord)
-                .where(CombatMatchRecord.id == match.id)
-                .with_for_update()
+                select(CombatMatchRecord).where(CombatMatchRecord.id == match.id).with_for_update()
             )
             assert locked is not None
             lock_acquired.set()
@@ -54,3 +54,36 @@ def test_skip_locked_uses_two_real_postgres_transactions() -> None:
         assert skipped.result(timeout=5) is None
         release_lock.set()
         holder.result(timeout=5)
+
+
+def test_case_insensitive_handle_race_has_one_owner() -> None:
+    if engine.dialect.name != "postgresql":
+        pytest.skip("requires TEST_DATABASE_URL pointing to PostgreSQL")
+
+    create_app()
+    with SessionLocal.begin() as session:
+        users = [User(email=f"handle-race-{uuid4().hex}@example.com") for _ in range(2)]
+        session.add_all(users)
+        session.flush()
+        user_ids = [user.id for user in users]
+        session.add_all(PlayerProfile(user_id=user_id) for user_id in user_ids)
+
+    barrier = Barrier(2)
+
+    def choose(user_id: int, display: str) -> str:
+        with SessionLocal() as session:
+            try:
+                barrier.wait(timeout=5)
+                set_profile_handle(session, user_id=user_id, handle=display)
+                session.commit()
+                return "ok"
+            except (HandleUnavailable, IntegrityError):
+                session.rollback()
+                return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = [
+            executor.submit(choose, user_ids[0], "Race_Name"),
+            executor.submit(choose, user_ids[1], "race_name"),
+        ]
+        assert sorted(result.result(timeout=5) for result in outcomes) == ["conflict", "ok"]

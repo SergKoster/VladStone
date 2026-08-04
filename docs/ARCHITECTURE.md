@@ -147,7 +147,14 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
   Google dev-login (только `environment=local`), refresh-cookie, logout.
   Секреты/URL — env через `core/config.py` (`google_oauth_*`, `frontend_url`,
   `cookie_secure`).
-- `routes/me.py`: профиль, коллекция (+ ascend — подлежит отключению, см. §7).
+- `routes/me.py`: приватный профиль, `PUT /me/handle` и коллекция (+ ascend —
+  подлежит отключению, см. §7). Выбор/смена handle проходит через
+  `services/profiles.py`: ASCII-валидация, lowercase key, блокировка профиля и
+  database-unique как последняя защита гонки.
+- `routes/profiles.py`: viewer-safe `GET /profiles/{handle}` без авторизации.
+  Исторический или отличающийся регистром URL отвечает permanent redirect на
+  canonical display handle; наружу выходят только handle, avatar, дата создания
+  и прогресс коллекции.
 - `services/combat_turn_timers.py`: дорезолв матчей с истёкшим дедлайном.
   Вызывается и лениво из роутов, и фоновым воркером
   `services/combat_timer_worker.py` (asyncio-задача в lifespan, тик 1 с,
@@ -163,13 +170,17 @@ COMBAT_REWORK) — источник счётчика `MatchState.current_iterati
   server-authoritative `tower_slots` сохраняет по пять постоянных колонок на
   сторону (`alive|destroyed`, HP, id/blueprint): погибшая башня удалена из
   `units` и винкона, но reconnect не сдвигает визуальные линии (§23.10).
+  Участник также несёт публичный snapshot `display_name`; для бота это «Бот»,
+  `user_id` по-прежнему наружу не сериализуется.
 - `services/rewards.py`: идемпотентная выдача награды (unique user+match).
 - `services/dev_logging.py`: JSONL-логи в `.dev/` для отладки боёв.
 
 ### 2.3 Хранилище
 
 SQLAlchemy + Alembic. Таблицы: users, auth_identities, email_login_codes,
-refresh_sessions, audit_log, player_profiles, card_definitions (пока legacy-
+refresh_sessions, audit_log, player_profiles, `profile_handles` (глобально
+уникальный lowercase `handle_key`, display-регистр, история и partial unique
+текущего handle на пользователя; миграция `0004`), card_definitions (пока legacy-
 проекция из `domain/combat/cards.py`; рассинхрон с live v4 — §8.18),
 player_cards (user, card, ascension→убрать, copies),
 combat_reward_claims (уникальность user+match), combat_matches (**состояние
@@ -533,6 +544,14 @@ seat и запускает v4-матч. `GET /matches/{id}/lobby` и cancel-rout
   сразу отправляет каждый план и страхует его в `sessionStorage` до конца
   текущего хода; после reload во время playback UI сразу коммитит актуальное
   server-state, не проигрывая уже прошедшую ленту.
+
+**Публичные handles и профили реализованы** (август 2026): новые и временные
+`Player`-аккаунты получают `onboarding_required` и не входят в основной app до
+выбора ника. `profile_handles` не удаляет retired names, поэтому старые ссылки
+канонически ведут на новый ник и имя нельзя передать другому аккаунту.
+Публичный payload не содержит email/coins/auth/combat secrets. В боевом state
+сохраняется display-name на момент admission, поэтому HTTP/WS/reconnect видят
+одинаковые имена без дополнительных profile-запросов.
 
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 

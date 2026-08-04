@@ -138,6 +138,8 @@ class PlayerState(BaseModel):
     is_bot: bool = False
     # Account behind this seat; None for bots and anonymous dev matches.
     user_id: int | None = None
+    # Public snapshot captured at admission; old matches fall back in payload.
+    display_name: str | None = None
     mana: int = Field(default=0, ge=0)
     hero: HeroState
     # Per-player deck cycle. Deck order AND contents are server-side secrets:

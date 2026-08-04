@@ -22,6 +22,10 @@ class GoogleDevLoginRequest(BaseModel):
     name: str | None = None
 
 
+class HandleUpdateRequest(BaseModel):
+    handle: str = Field(min_length=3, max_length=25, pattern=r"^[A-Za-z0-9_]+$")
+
+
 class AuthResponse(BaseModel):
     access_token: str
     user: dict

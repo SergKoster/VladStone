@@ -79,6 +79,60 @@ p {
   background: #fbfcfa;
 }
 
+.handle-onboarding {
+  display: grid;
+  gap: 12px;
+}
+
+.form-error {
+  margin: 0;
+  color: #9d3d35;
+}
+
+.public-profile-shell {
+  min-height: 100dvh;
+  padding: 28px;
+}
+
+.profile-private-note {
+  color: #66746b;
+}
+
+.profile-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-avatar {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: #2d5f4d;
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.profile-rename {
+  display: grid;
+  gap: 8px;
+  max-width: 460px;
+  padding: 16px;
+  border: 1px solid #d4ddd6;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.profile-rename > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
 .brand {
   margin-bottom: 8px;
   color: #2d5f4d;
@@ -2441,6 +2495,22 @@ nav {
 .battle-sidebar-controls {
   display: grid;
   gap: 8px;
+}
+
+.battle-player-names {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #42524a;
+  text-align: center;
+}
+
+.battle-player-names span {
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .battle-surrender {

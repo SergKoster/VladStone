@@ -1261,6 +1261,11 @@ export function BattleV4({
       </section>
 
       <section className="battle-side">
+        <div className="battle-player-names" aria-label="Участники боя">
+          <span>{viewer?.display_name ?? "Игрок"}</span>
+          <b>VS</b>
+          <span>{enemy?.display_name ?? (enemy?.is_bot ? "Бот" : "Игрок")}</span>
+        </div>
         <div className="battle-hud">
           <div className={secondsLeft <= 5 ? "turn-timer warning" : "turn-timer"}>
             {secondsLeft}

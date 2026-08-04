@@ -1,6 +1,8 @@
 # План правок после внешнего PvP-плейтеста
 
-> **Статус:** утверждённый текущий приоритет; реализация ещё не начата.
+> **Статус:** в реализации. Этапы 0–1 и 5 закрыты; этапы 2–4 реализованы
+> частично и имеют приоритетные UI/lifecycle-регрессии в `TODO.md`; следующий
+> новый инфраструктурный этап — 6.
 >
 > **Источник фидбека:** [PLAYTEST_NOTES.md](PLAYTEST_NOTES.md), плейтест
 > 4 августа 2026 и последующие решения владельца в чате.
@@ -411,6 +413,12 @@ Server payload/WS pong дают серверное время, planning deadline
 reconnect в finished match показывает тот же результат.
 
 ### Этап 5. Ники и публичные профили
+
+**Статус: реализован (4 августа 2026).** Миграция `0004_profile_handles`,
+onboarding для временного `Player`, атомарный case-insensitive handle,
+непереиспользуемая история, canonical API redirect, viewer-safe публичный
+профиль, hash-route профиля и display names в battle payload. PostgreSQL job
+проверяет конкурентный выбор `Name`/`name`; API-тесты — privacy и rename.
 
 - Добавить additive migration истории handles и onboarding-required state.
 - Реализовать атомарный выбор/смену ника и canonical redirect.

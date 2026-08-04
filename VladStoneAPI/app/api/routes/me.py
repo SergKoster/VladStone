@@ -2,12 +2,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import PlayerCard, PlayerProfile
+from app.api.schemas import HandleUpdateRequest
+from app.db.models import PlayerCard
 from app.db.session import get_db
 from app.domain.combat.engine.payload import v4_catalog_payload
+from app.services.accounts import audit
 from app.services.auth import get_user_by_refresh_token
+from app.services.profiles import HandleUnavailable, private_profile_payload, set_profile_handle
 
 router = APIRouter(prefix="/me", tags=["me"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -20,14 +24,30 @@ def get_me(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     user = _require_user(db, refresh_token)
-    profile = db.scalar(select(PlayerProfile).where(PlayerProfile.user_id == user.id))
-    return {
-        "id": user.id,
-        "email": user.email,
-        "nickname": profile.nickname if profile else "Player",
-        "coins": profile.coins if profile else 0,
-        "created_at": user.created_at.isoformat(),
-    }
+    return private_profile_payload(db, user=user)
+
+
+@router.put("/handle")
+def update_handle(
+    payload: HandleUpdateRequest,
+    db: DbSession,
+    refresh_token: RefreshTokenCookie = None,
+) -> dict:
+    user = _require_user(db, refresh_token)
+    try:
+        set_profile_handle(db, user_id=user.id, handle=payload.handle)
+        audit(db, user.id, "profile.handle_changed", {"handle": payload.handle})
+        db.commit()
+    except HandleUnavailable as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from None
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Handle is already reserved",
+        ) from None
+    return private_profile_payload(db, user=user)
 
 
 @router.get("/collection")

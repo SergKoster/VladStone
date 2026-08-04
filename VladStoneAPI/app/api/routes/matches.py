@@ -29,6 +29,7 @@ from app.services.match_invites import (
     get_match_invite,
     join_match_invite,
 )
+from app.services.profiles import display_handle_for_user
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -41,7 +42,11 @@ def create_invite(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     user = _require_user(db, refresh_token)
-    state, invite, token = create_match_invite(db, creator_user_id=user.id)
+    state, invite, token = create_match_invite(
+        db,
+        creator_user_id=user.id,
+        creator_display_name=display_handle_for_user(db, user.id),
+    )
     audit(db, user.id, "match.invite_created", {"match_id": state.id})
     db.commit()
     return {
@@ -62,7 +67,12 @@ async def join_invite(
 ) -> dict:
     user = _require_user(db, refresh_token)
     try:
-        state = join_match_invite(db, token=payload.token, user_id=user.id)
+        state = join_match_invite(
+            db,
+            token=payload.token,
+            user_id=user.id,
+            display_name=display_handle_for_user(db, user.id),
+        )
     except InviteNotFound:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

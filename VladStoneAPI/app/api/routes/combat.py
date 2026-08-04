@@ -43,6 +43,7 @@ from app.services.combat_turn_timers import (
     ResolvedPlanningMatch,
     resolve_expired_planning_match,
 )
+from app.services.profiles import display_handle_for_user
 from app.services.rate_limit import allow_attempt
 from app.services.rewards import claim_combat_reward
 
@@ -68,7 +69,9 @@ def start_combat(
     user = _combat_user_or_401(db, refresh_token)
     _require_combat_rate(f"combat-start:{user.id if user else 'local'}", limit=START_LIMIT)
     state = create_v4_battle(
-        match_id=f"local_pve_{uuid4().hex}", user_id=user.id if user else None
+        match_id=f"local_pve_{uuid4().hex}",
+        user_id=user.id if user else None,
+        display_name=display_handle_for_user(db, user.id) if user else None,
     )
     create_combat_match_record(db, match=state, owner_user_id=user.id if user else None)
     audit(
@@ -351,9 +354,7 @@ async def resolve_combat_turn(
     save_v4_battle(record, state)
 
     try:
-        reward_claimed = user is not None and claim_combat_reward(
-            db, match=state, user_id=user.id
-        )
+        reward_claimed = user is not None and claim_combat_reward(db, match=state, user_id=user.id)
         audit(
             db,
             user.id if user else None,
@@ -409,21 +410,15 @@ async def resolve_combat_turn(
 
 
 def _build_intents(player_id: str, payload: ResolveTurnRequest) -> PlayerIntents:
-    spawns = tuple(
-        SpawnIntent(card_id=p.card_id, row=p.row, col=p.col) for p in payload.placements
-    )
-    spells = tuple(
-        SpellIntent(card_id=s.card_id, row=s.row, col=s.col) for s in payload.spells
-    )
+    spawns = tuple(SpawnIntent(card_id=p.card_id, row=p.row, col=p.col) for p in payload.placements)
+    spells = tuple(SpellIntent(card_id=s.card_id, row=s.row, col=s.col) for s in payload.spells)
     return PlayerIntents(player_id=player_id, spells=spells, spawns=spawns)
 
 
 def _get_authorized_record(db: Session, match_id: str, refresh_token: str | None):
     record = get_combat_match_record(db, match_id)
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Combat match not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Combat match not found")
     user = _combat_user_or_401(db, refresh_token)
     if user is not None:
         participant = get_combat_match_participant(db, match_id=match_id, user_id=user.id)

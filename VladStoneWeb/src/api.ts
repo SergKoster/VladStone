@@ -14,8 +14,17 @@ export type ProfileResponse = {
   id: number;
   email: string;
   nickname: string;
+  handle: string | null;
+  onboarding_required: boolean;
   coins: number;
   created_at: string;
+};
+
+export type PublicProfileResponse = {
+  handle: string;
+  avatar_key: string | null;
+  created_at: string;
+  collection: { owned: number; total: number };
 };
 
 export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
@@ -206,6 +215,7 @@ export type CombatMatch = {
     /** Team index; allies share a team, the enemy is any other team. */
     team: number;
     is_bot: boolean;
+    display_name: string;
     mana: number;
     /** Public confirmation state; the actual plan remains private. */
     ready: boolean;
@@ -315,6 +325,17 @@ export function googleLoginUrl() {
 
 export function getMe() {
   return request<ProfileResponse>("/me");
+}
+
+export function updateMyHandle(handle: string) {
+  return request<ProfileResponse>("/me/handle", {
+    method: "PUT",
+    body: JSON.stringify({ handle }),
+  });
+}
+
+export function getPublicProfile(handle: string) {
+  return request<PublicProfileResponse>(`/profiles/${encodeURIComponent(handle)}`);
 }
 
 export function getCombatCatalog() {
