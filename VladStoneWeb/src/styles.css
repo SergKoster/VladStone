@@ -2403,7 +2403,11 @@ nav {
 .tower-token {
   position: relative;
   z-index: 2;
+  width: 90%;
   transition: filter 160ms ease;
+}
+.tower.dead {
+  width: 90%;
 }
 .tower-token.lunging {
   z-index: 5;
