@@ -793,7 +793,13 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   // мерим ЖИВЬЁМ на каждом move: страница может проскроллиться / сервер
   // дорезолвит ход по таймеру, заранее снятые координаты устаревают.
   function cellFromPoint(x: number, y: number): { row: number; col: number } | null {
-    const el = document.elementFromPoint(x, y)?.closest(".cell-v4");
+    const hit = document.elementFromPoint(x, y);
+    const unitId = hit?.closest<HTMLElement>(".unit-token")?.dataset.unitId;
+    if (unitId) {
+      const unit = renderedMatch?.units.find((candidate) => candidate.id === unitId);
+      if (unit && !unit.is_tower) return { row: unit.row, col: unit.col };
+    }
+    const el = hit?.closest(".cell-v4");
     if (!el) return null;
     const row = Number(el.getAttribute("data-row"));
     const col = Number(el.getAttribute("data-col"));

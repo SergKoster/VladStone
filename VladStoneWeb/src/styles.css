@@ -20,6 +20,13 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 button,
 input {
   font: inherit;
@@ -1618,6 +1625,7 @@ nav {
   position: relative;
   width: 100%;
   aspect-ratio: var(--cols) / var(--rows);
+  overflow: clip;
 }
 
 .board-v4 {
