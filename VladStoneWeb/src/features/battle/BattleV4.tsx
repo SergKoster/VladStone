@@ -1040,6 +1040,10 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
                 acting={activeEvent?.actor_id === unit.id}
                 catalog={catalog}
                 dying={dyingIds.includes(unit.id)}
+                friendly={
+                  viewer != null &&
+                  renderedMatch?.players.find((player) => player.id === unit.owner_id)?.team === viewer.team
+                }
                 lunge={lungeByUnit.get(unit.id)}
                 displayRow={rowForViewer(unit.row)}
                 spawning={spawningIds.includes(unit.id)}
@@ -1512,6 +1516,7 @@ function UnitToken({
   catalog,
   displayRow,
   dying,
+  friendly,
   inspected,
   lunge,
   onInspectorBlur,
@@ -1531,6 +1536,8 @@ function UnitToken({
   catalog: Map<string, CombatCatalogCard>;
   displayRow: number;
   dying: boolean;
+  /** Цвета сторон относительны зрителю: свой юнит всегда зелёный. */
+  friendly: boolean;
   inspected: boolean;
   lunge?: LungeEffect;
   onInspectorBlur: () => void;
@@ -1591,7 +1598,7 @@ function UnitToken({
         <span
           className={[
             "unit-v4",
-            unit.side,
+            friendly ? "friendly" : "enemy",
             `stance-${unit.stance}`,
             acting ? "acting" : "",
             targeted ? "targeted" : "",

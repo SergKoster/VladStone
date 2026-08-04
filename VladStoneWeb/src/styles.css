@@ -1976,10 +1976,10 @@ nav {
   height: 100%;
   border-radius: 8px;
   overflow: hidden;
-  /* Обводка = сторона (свой/чужой), НЕ стойка. Стойка — иконкой внизу (W3). */
+  /* Обводка = сторона относительно зрителя (свой/чужой), НЕ стойка. */
   box-shadow: 0 0 0 2px #2d9d5f;
 }
-.unit-v4.top {
+.unit-v4.enemy {
   box-shadow: 0 0 0 2px #d0443c;
 }
 
@@ -1992,8 +1992,8 @@ nav {
     0 0 0 4px #ffc34d,
     0 0 12px rgb(255 188 61 / 0.72);
 }
-.unit-v4.top.inspected,
-.unit-layer-v4 .unit-token:focus-visible .unit-v4.top {
+.unit-v4.enemy.inspected,
+.unit-layer-v4 .unit-token:focus-visible .unit-v4.enemy {
   --unit-side-outline: #d0443c;
 }
 
@@ -2005,7 +2005,7 @@ nav {
     0 0 0 4px #8a4bc0,
     0 0 12px rgb(138 75 192 / 0.6);
 }
-.unit-v4.top.spell-target {
+.unit-v4.enemy.spell-target {
   --unit-side-outline: #d0443c;
 }
 
