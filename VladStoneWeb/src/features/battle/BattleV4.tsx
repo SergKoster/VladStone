@@ -46,6 +46,7 @@ type Props = {
   /** Deep link target; avoids restoring an unrelated active PvE match. */
   initialMatchId?: string;
   onBattleControlsChange: (controls: BattleSidebarControls | null) => void;
+  onExistingMatch: (match: CombatMatch) => void;
   onBattleFinished: () => void;
 };
 
@@ -100,6 +101,7 @@ export function BattleV4({
   statuses,
   initialMatchId,
   onBattleControlsChange,
+  onExistingMatch,
   onBattleFinished,
 }: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
@@ -736,6 +738,14 @@ export function BattleV4({
       completedReplayCursorRef.current = null;
       responseQueueRef.current = Promise.resolve();
       setIsReady(false);
+    } catch {
+      // The server's active-slot conflict is deliberate: never create a
+      // second match from another tab.  Resolve it through the canonical
+      // active endpoint so this client opens that match instead.
+      const existing = await getActiveCombats()
+        .then((payload) => payload.matches[0] ?? null)
+        .catch(() => null);
+      if (existing) onExistingMatch(existing);
     } finally {
       setBusy(false);
     }

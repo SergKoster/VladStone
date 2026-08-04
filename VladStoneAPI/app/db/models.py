@@ -229,6 +229,25 @@ class CombatMatchParticipant(Base):
     )
 
 
+class CombatActiveSlot(Base):
+    """The single active-match reservation for an account.
+
+    ``match_id`` is momentarily NULL only inside admission's transaction while
+    the slot is locked and the new match record is being assembled.
+    """
+
+    __tablename__ = "combat_active_slots"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    match_id: Mapped[str | None] = mapped_column(
+        ForeignKey("combat_matches.id"), nullable=True, index=True
+    )
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+
 class MatchInviteRecord(Base):
     """Single-use invitation capability. Only its SHA-256 digest is persisted."""
 

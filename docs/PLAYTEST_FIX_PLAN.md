@@ -111,8 +111,8 @@ process/instance без переписывания данных.
 | Таймер | нижний предел равен 5 секундам | `domain/combat/engine/timing.py` |
 | Результат | payload не даёт клиенту достаточную каноническую причину финала | `engine/payload.py`, модели боя |
 | Surrender | отдельного серверного перехода и причины результата нет | combat routes/services, rewards |
-| Активный бой | API допускает список из нескольких активных матчей | `services/combat_matches.py`, `api/routes/combat.py` |
-| Invite | waiting-lobby создаётся до входа второго игрока, но не захватывает общий слот аккаунта | `services/match_invites.py` |
+| Активный бой | закрыто этапом 6: слот на аккаунт и атомарный admission не дают создать второй матч | `services/battle_admission.py`, `combat_active_slots` |
+| Invite | закрыто этапом 6: waiting-lobby захватывает слот создателя, join — слот второго игрока | `services/match_invites.py` |
 | Ники | `PlayerProfile.nickname` не уникален, текущий default повторяется | `db/models.py`, profile/account routes |
 | Realtime | ping отправляется, но pong не используется для RTT; менеджер process-local | `realtime/match_channels.py` |
 | Награды | идемпотентная выдача уже защищена уникальностью user+match | `services/rewards.py`, `combat_reward_claims` |
@@ -430,6 +430,14 @@ onboarding для временного `Player`, атомарный case-insensi
 старый URL после rename ведёт на новый; приватные поля не появляются в payload.
 
 ### Этап 6. Инвариант одного активного боя
+
+**Статус: реализован (4 августа 2026).** Миграция `0005_active_match_slots`
+проводит newest-wins backfill и гасит конфликтующие старые матчи. Один
+`BattleAdmissionService` обслуживает PvE, создание invite-lobby и join;
+terminal save/expiry/cancel в той же транзакции освобождают slots.
+`/combat/active` сохраняет прежний shape, но возвращает максимум один матч,
+а conflict API несёт `current_match_id`; фронт открывает этот match/lobby.
+PostgreSQL job проверяет две параллельные вкладки одного аккаунта.
 
 - Добавить active slots и `BattleAdmissionService`.
 - Перевести на него PvE start, invite create/join и match completion/expiry.

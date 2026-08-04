@@ -6,12 +6,14 @@ import {
   type AuthProviders,
   type AuthUser,
   type CombatCatalogCard,
+  type CombatMatch,
   type CombatStatusDefinition,
   type CollectionCard,
   type PublicProfileResponse,
   getAuthProviders,
   getCollection,
   getCombatCatalog,
+  getActiveCombats,
   getMe,
   getPublicProfile,
   createMatchInvite,
@@ -202,6 +204,17 @@ function App() {
     setRoute({ page: "profile", handle: updated.handle ?? undefined });
   }
 
+  const openExistingMatch = React.useCallback(
+    (match: CombatMatch) => {
+      setRoute(
+        match.status === "waiting_for_opponent"
+          ? { page: "lobby", matchId: match.id }
+          : { page: "battle", matchId: match.id },
+      );
+    },
+    [setRoute],
+  );
+
   async function handleCreateInvite() {
     setInviteMessage("");
     try {
@@ -209,7 +222,14 @@ function App() {
       window.sessionStorage.setItem(`vladstone.invite.${response.match.id}`, response.invite.share_path);
       setRoute({ page: "lobby", matchId: response.match.id });
     } catch {
-      setInviteMessage("Не удалось создать приглашение. Попробуй ещё раз.");
+      const existing = await getActiveCombats()
+        .then((payload) => payload.matches[0] ?? null)
+        .catch(() => null);
+      if (existing) {
+        openExistingMatch(existing);
+      } else {
+        setInviteMessage("Не удалось создать приглашение. Попробуй ещё раз.");
+      }
     }
   }
 
@@ -326,6 +346,7 @@ function App() {
             cards={catalog}
             initialMatchId={route.matchId}
             onBattleControlsChange={handleBattleControlsChange}
+            onExistingMatch={openExistingMatch}
             statuses={statusCatalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
@@ -341,6 +362,7 @@ function App() {
           <JoinInvite
             token={route.token}
             onBack={() => setRoute("dashboard")}
+            onExistingMatch={openExistingMatch}
             onJoined={(matchId) => setRoute({ page: "battle", matchId })}
           />
         )}

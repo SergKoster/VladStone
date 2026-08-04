@@ -4,10 +4,10 @@ import json
 from datetime import UTC, datetime
 from typing import Protocol
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session, object_session
 
-from app.db.models import CombatMatchParticipant, CombatMatchRecord
+from app.db.models import CombatActiveSlot, CombatMatchParticipant, CombatMatchRecord
 from app.domain.combat.constants import RULESET_VERSION
 from app.domain.combat.engine.battle import BattleStateV4
 from app.domain.combat.models import MatchLifecycleStatus, MatchState
@@ -87,9 +87,7 @@ class SqlAlchemyCombatMatchStore:
         record.winner_id = match.result.winner_id
 
     def expire_stale(self, *, older_than: datetime, owner_user_id: int | None = None) -> int:
-        query = select(CombatMatchRecord).where(
-            CombatMatchRecord.status.in_(ACTIVE_MATCH_STATUSES)
-        )
+        query = select(CombatMatchRecord).where(CombatMatchRecord.status.in_(ACTIVE_MATCH_STATUSES))
         if owner_user_id is not None:
             query = query.where(CombatMatchRecord.owner_user_id == owner_user_id)
 
@@ -127,18 +125,11 @@ def list_active_combat_match_records_for_user(
     return list(
         db.scalars(
             select(CombatMatchRecord)
-            .outerjoin(
-                CombatMatchParticipant,
-                CombatMatchParticipant.match_id == CombatMatchRecord.id,
-            )
+            .join(CombatActiveSlot, CombatActiveSlot.match_id == CombatMatchRecord.id)
             .where(
-                or_(
-                    CombatMatchParticipant.user_id == user_id,
-                    CombatMatchRecord.owner_user_id == user_id,
-                )
+                CombatActiveSlot.user_id == user_id,
             )
             .where(CombatMatchRecord.status.in_(ACTIVE_MATCH_STATUSES))
-            .order_by(CombatMatchRecord.updated_at.desc())
         )
     )
 
@@ -183,6 +174,7 @@ def save_match(record: CombatMatchRecord, match: MatchState) -> None:
     record.state_json = _dump_match(match)
     record.status = match.status.value
     record.winner_id = match.result.winner_id
+    _release_slots_when_terminal(record)
 
 
 def load_v4_battle(record: CombatMatchRecord) -> BattleStateV4:
@@ -193,6 +185,7 @@ def save_v4_battle(record: CombatMatchRecord, state: BattleStateV4) -> None:
     record.state_json = state.model_dump_json()
     record.status = state.status.value
     record.winner_id = state.result.winner_id
+    _release_slots_when_terminal(record)
 
 
 def expire_stale_combat_matches(
@@ -249,6 +242,7 @@ def _expire_raw_state(record: CombatMatchRecord, raw: dict) -> None:
     raw.setdefault("log", []).append({"message": RULESET_EXPIRED_MESSAGE})
     record.state_json = json.dumps(raw, ensure_ascii=False)
     record.status = MatchLifecycleStatus.EXPIRED.value
+    _release_slots_when_terminal(record)
 
 
 def expired_match_payload(match_id: str) -> dict:
@@ -281,6 +275,16 @@ def _mark_record_expired_raw(record: CombatMatchRecord) -> None:
     raw["status"] = MatchLifecycleStatus.EXPIRED.value
     record.state_json = json.dumps(raw, ensure_ascii=False)
     record.status = MatchLifecycleStatus.EXPIRED.value
+    _release_slots_when_terminal(record)
+
+
+def _release_slots_when_terminal(record: CombatMatchRecord) -> None:
+    """Release every participant's active slot in the same DB transaction."""
+    if record.status in ACTIVE_MATCH_STATUSES:
+        return
+    db = object_session(record)
+    if db is not None:
+        db.execute(delete(CombatActiveSlot).where(CombatActiveSlot.match_id == record.id))
 
 
 def _dump_match(match: MatchState) -> str:

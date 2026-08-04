@@ -27,15 +27,14 @@ from app.domain.combat.models import MatchLifecycleStatus
 from app.realtime.match_channels import match_channel_manager
 from app.services.accounts import audit
 from app.services.auth import get_user_by_refresh_token
+from app.services.battle_admission import BattleAdmissionService
 from app.services.combat_matches import (
     create_combat_match_record,
     expire_combat_match_if_outdated,
     expire_combat_match_if_stale,
-    expire_stale_combat_matches,
     expired_match_payload,
     get_combat_match_participant,
     get_combat_match_record,
-    list_active_combat_match_records_for_user,
     load_v4_battle,
     save_v4_battle,
 )
@@ -68,12 +67,23 @@ def start_combat(
 ) -> dict:
     user = _combat_user_or_401(db, refresh_token)
     _require_combat_rate(f"combat-start:{user.id if user else 'local'}", limit=START_LIMIT)
-    state = create_v4_battle(
-        match_id=f"local_pve_{uuid4().hex}",
-        user_id=user.id if user else None,
-        display_name=display_handle_for_user(db, user.id) if user else None,
-    )
-    create_combat_match_record(db, match=state, owner_user_id=user.id if user else None)
+    if user is None:
+        state = create_v4_battle(match_id=f"local_pve_{uuid4().hex}")
+        create_combat_match_record(db, match=state, owner_user_id=None)
+    else:
+        admitted = BattleAdmissionService(db).admit_new_match(
+            user_id=user.id,
+            owner_user_id=user.id,
+            build_state=lambda: create_v4_battle(
+                match_id=f"local_pve_{uuid4().hex}",
+                user_id=user.id,
+                display_name=display_handle_for_user(db, user.id),
+            ),
+        )
+        if not admitted.created:
+            raise _active_match_conflict(admitted.record.id)
+        assert admitted.state is not None
+        state = admitted.state
     audit(
         db,
         user.id if user else None,
@@ -92,30 +102,18 @@ def list_active_combat(
     user = _combat_user_or_401(db, refresh_token)
     if user is None:
         return {"matches": []}
-    expired_count = expire_stale_combat_matches(
-        db,
-        older_than=_stale_match_cutoff(),
-        owner_user_id=user.id,
-    )
-    if expired_count:
-        audit(db, user.id, "combat.matches_expired", {"expired_count": expired_count})
-        db.commit()
-    records = list_active_combat_match_records_for_user(db, user_id=user.id)
-    # Ruleset gate: matches from an older ruleset are expired here instead of
-    # being offered for restore (the client must never resume them).
-    outdated_ids = [record.id for record in records if expire_combat_match_if_outdated(record)]
-    if outdated_ids:
-        for match_id in outdated_ids:
-            audit(db, user.id, "combat.match_expired_ruleset", {"match_id": match_id})
-        db.commit()
-        records = [record for record in records if record.id not in outdated_ids]
+    record = BattleAdmissionService(db).current_active_match(user_id=user.id)
+    # The service may have reconciled a stale/ruleset-expired slot. Commit its
+    # cleanup before returning so every tab observes the same active match.
+    db.commit()
     return {
         "matches": [
             v4_combat_response(
                 load_v4_battle(record),
                 viewer_id=_viewer_id_for_record(db, load_v4_battle(record), record, refresh_token),
             )["match"]
-            for record in records
+            for record in [record]
+            if record is not None
         ]
     }
 
@@ -478,6 +476,13 @@ def _require_combat_rate(key: str, *, limit: int) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many attempts",
         )
+
+
+def _active_match_conflict(match_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "active_match_exists", "current_match_id": match_id},
+    )
 
 
 def _expire_record_if_stale(db: Session, record) -> bool:

@@ -13,6 +13,7 @@ from app.domain.combat.engine.payload import v4_combat_response
 from app.realtime.match_channels import match_channel_manager
 from app.services.accounts import audit
 from app.services.auth import get_user_by_refresh_token
+from app.services.battle_admission import ActiveMatchExists
 from app.services.combat_matches import (
     get_combat_match_participant,
     get_combat_match_record,
@@ -42,11 +43,14 @@ def create_invite(
     refresh_token: RefreshTokenCookie = None,
 ) -> dict:
     user = _require_user(db, refresh_token)
-    state, invite, token = create_match_invite(
-        db,
-        creator_user_id=user.id,
-        creator_display_name=display_handle_for_user(db, user.id),
-    )
+    try:
+        state, invite, token = create_match_invite(
+            db,
+            creator_user_id=user.id,
+            creator_display_name=display_handle_for_user(db, user.id),
+        )
+    except ActiveMatchExists as existing:
+        raise _active_match_conflict(existing.record.id) from None
     audit(db, user.id, "match.invite_created", {"match_id": state.id})
     db.commit()
     return {
@@ -83,6 +87,8 @@ async def join_invite(
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired") from None
     except InviteConflict as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from None
+    except ActiveMatchExists as existing:
+        raise _active_match_conflict(existing.record.id) from None
 
     audit(db, user.id, "match.invite_joined", {"match_id": state.id})
     try:
@@ -155,3 +161,10 @@ def _require_user(db: Session, refresh_token: str | None):
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
+
+
+def _active_match_conflict(match_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "active_match_exists", "current_match_id": match_id},
+    )

@@ -8,10 +8,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CombatMatchRecord, PlayerProfile, User
+from app.db.models import CombatActiveSlot, CombatMatchRecord, PlayerProfile, User
 from app.db.session import SessionLocal, engine
 from app.domain.combat.engine.battle import create_v4_battle
 from app.main import create_app
+from app.services.battle_admission import BattleAdmissionService
 from app.services.combat_matches import create_combat_match_record
 from app.services.profiles import HandleUnavailable, set_profile_handle
 
@@ -87,3 +88,46 @@ def test_case_insensitive_handle_race_has_one_owner() -> None:
             executor.submit(choose, user_ids[1], "race_name"),
         ]
         assert sorted(result.result(timeout=5) for result in outcomes) == ["conflict", "ok"]
+
+
+def test_parallel_pve_admission_keeps_one_current_match() -> None:
+    if engine.dialect.name != "postgresql":
+        pytest.skip("requires TEST_DATABASE_URL pointing to PostgreSQL")
+
+    create_app()
+    with SessionLocal.begin() as session:
+        user = User(email=f"admission-race-{uuid4().hex}@example.com")
+        session.add(user)
+        session.flush()
+        user_id = user.id
+
+    barrier = Barrier(2)
+
+    def start_from_tab() -> tuple[str, bool]:
+        with SessionLocal() as session:
+            barrier.wait(timeout=5)
+            admitted = BattleAdmissionService(session).admit_new_match(
+                user_id=user_id,
+                owner_user_id=user_id,
+                build_state=lambda: create_v4_battle(
+                    match_id=f"postgres_admission_{uuid4().hex}",
+                    user_id=user_id,
+                ),
+            )
+            session.commit()
+            return admitted.record.id, admitted.created
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = [executor.submit(start_from_tab), executor.submit(start_from_tab)]
+        resolved = [future.result(timeout=5) for future in outcomes]
+
+    assert {match_id for match_id, _ in resolved}
+    assert len({match_id for match_id, _ in resolved}) == 1
+    assert sorted(created for _, created in resolved) == [False, True]
+    with SessionLocal() as session:
+        slots = list(
+            session.scalars(
+                select(CombatActiveSlot).where(CombatActiveSlot.user_id == user_id)
+            )
+        )
+        assert len(slots) == 1 and slots[0].match_id == resolved[0][0]

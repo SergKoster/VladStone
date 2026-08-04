@@ -17,9 +17,9 @@ from app.domain.combat.engine.battle import (
     create_v4_pvp_lobby,
 )
 from app.domain.combat.models import MatchLifecycleStatus
+from app.services.battle_admission import ActiveMatchExists, BattleAdmissionService
 from app.services.combat_matches import (
     add_combat_match_participant,
-    create_combat_match_record,
     get_combat_match_participant,
     get_combat_match_record,
     load_v4_battle,
@@ -62,12 +62,19 @@ def create_match_invite(
 ) -> tuple[BattleStateV4, MatchInviteRecord, str]:
     created_at = _as_utc(now or datetime.now(UTC))
     match_id = f"pvp_{uuid4().hex}"
-    state = create_v4_pvp_lobby(
-        match_id=match_id,
-        creator_user_id=creator_user_id,
-        creator_display_name=creator_display_name,
+    admitted = BattleAdmissionService(db, now=created_at).admit_new_match(
+        user_id=creator_user_id,
+        owner_user_id=creator_user_id,
+        build_state=lambda: create_v4_pvp_lobby(
+            match_id=match_id,
+            creator_user_id=creator_user_id,
+            creator_display_name=creator_display_name,
+        ),
     )
-    create_combat_match_record(db, match=state, owner_user_id=creator_user_id)
+    if not admitted.created:
+        raise ActiveMatchExists(admitted.record)
+    assert admitted.state is not None
+    state = admitted.state
 
     token = secrets.token_urlsafe(32)
     invite = MatchInviteRecord(
@@ -122,6 +129,10 @@ def join_match_invite(
     state = load_v4_battle(record)
     if state.status != MatchLifecycleStatus.WAITING_FOR_OPPONENT:
         raise InviteConflict("Match is no longer waiting")
+    BattleAdmissionService(db, now=accepted_at).reserve_participant_slot(
+        user_id=user_id,
+        match_id=record.id,
+    )
     activate_v4_pvp_battle(
         state,
         opponent_user_id=user_id,
@@ -153,9 +164,8 @@ def expire_invite_if_needed(
     invite: MatchInviteRecord,
     now: datetime | None = None,
 ) -> bool:
-    if (
-        invite.status != INVITE_PENDING
-        or _as_utc(invite.expires_at) > _as_utc(now or datetime.now(UTC))
+    if invite.status != INVITE_PENDING or _as_utc(invite.expires_at) > _as_utc(
+        now or datetime.now(UTC)
     ):
         return False
     record = get_combat_match_record(db, invite.match_id)

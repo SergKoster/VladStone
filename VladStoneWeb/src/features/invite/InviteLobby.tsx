@@ -2,8 +2,10 @@ import React from "react";
 
 import {
   cancelMatchInvite,
+  getActiveCombats,
   getMatchLobby,
   joinMatchInvite,
+  type CombatMatch,
   type MatchLobbyResponse,
 } from "../../api";
 
@@ -102,10 +104,12 @@ export function CreatedInviteLobby({
 export function JoinInvite({
   token,
   onBack,
+  onExistingMatch,
   onJoined,
 }: {
   token: string;
   onBack: () => void;
+  onExistingMatch: (match: CombatMatch) => void;
   onJoined: (matchId: string) => void;
 }) {
   const started = React.useRef(false);
@@ -119,8 +123,17 @@ export function JoinInvite({
         window.sessionStorage.removeItem(PENDING_INVITE_ROUTE_KEY);
         onJoined(response.match.id);
       })
-      .catch(() => setMessage("Приглашение недействительно, истекло или уже занято."));
-  }, [onJoined, token]);
+      .catch(async () => {
+        const existing = await getActiveCombats()
+          .then((payload) => payload.matches[0] ?? null)
+          .catch(() => null);
+        if (existing) {
+          onExistingMatch(existing);
+          return;
+        }
+        setMessage("Приглашение недействительно, истекло или уже занято.");
+      });
+  }, [onExistingMatch, onJoined, token]);
 
   return (
     <section className="invite-page page">

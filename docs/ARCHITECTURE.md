@@ -185,6 +185,9 @@ refresh_sessions, audit_log, player_profiles, `profile_handles` (глобаль�
 player_cards (user, card, ascension→убрать, copies),
 combat_reward_claims (уникальность user+match), combat_matches (**состояние
 матча — JSON-блоб `state_json`**, статус/владелец — колонками для выборок).
+`combat_active_slots` (PK `user_id` → текущий `match_id`, миграция `0005`)
+является database-инвариантом «один активный матч на аккаунт»; NULL
+`match_id` допустим лишь внутри незавершённой admission-транзакции.
 
 Решение: состояние боя как JSON — осознанное (быстрая эволюция правил без
 миграций); индексируемые поля выносятся в колонки.
@@ -552,6 +555,16 @@ seat и запускает v4-матч. `GET /matches/{id}/lobby` и cancel-rout
 Публичный payload не содержит email/coins/auth/combat secrets. В боевом state
 сохраняется display-name на момент admission, поэтому HTTP/WS/reconnect видят
 одинаковые имена без дополнительных profile-запросов.
+
+**Инвариант одного активного боя реализован** (август 2026):
+`BattleAdmissionService` блокирует account rows в устойчивом порядке, очищает
+stale/ruleset-expired slot и захватывает `combat_active_slots` до создания PvE
+или invite-lobby/входа второго игрока. Conflict имеет стабильный
+`detail.code=active_match_exists` и `current_match_id`; клиент открывает
+канонический бой вместо второго. Terminal state, expiry и отмена waiting-lobby
+удаляют slots в той же транзакции. Migration `0005` бэкфиллит существующие
+матчи newest-wins и помечает остальные `expired`; `/combat/active` сохраняет
+старый payload, но максимум с одной записью.
 
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
