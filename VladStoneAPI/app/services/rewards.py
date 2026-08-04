@@ -29,6 +29,8 @@ def claim_combat_reward(db: Session, *, match: MatchState, user_id: int) -> bool
         None,
     ) or next((candidate for candidate in match.players if not candidate.is_bot), None)
     did_win = player is not None and player.team == match.result.winner_team
+    if not did_win:
+        return False
 
     profile.coins += match.result.reward_coins
     db.add(

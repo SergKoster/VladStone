@@ -15,6 +15,7 @@ import {
   planCombat,
   readyCombat,
   startCombat,
+  surrenderCombat,
 } from "../../api";
 import { CardArt } from "../../shared/cardArt";
 import { BootIcon, BurstIcon, HeartIcon, SwordIcon } from "../../shared/icons";
@@ -726,6 +727,16 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     }
   }
 
+  async function handleSurrender() {
+    if (!match || isAnimating || !window.confirm("Сдаться? Матч будет сразу завершён.")) return;
+    setBusy(true);
+    try {
+      queueResolution(await surrenderCombat(match.id));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const unitAt = (row: number, col: number): CombatUnit | undefined =>
     renderedMatch?.units.find((u) => !u.is_tower && u.row === row && u.col === col);
   const plannedAt = (row: number, col: number) =>
@@ -971,6 +982,9 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         <div className="battle-topbar">
           <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
             Новый бой
+          </button>
+          <button className="ghost-btn" disabled={busy || isAnimating || isFinished} onClick={handleSurrender}>
+            Сдаться
           </button>
           <span className="rt-status">{realtime}</span>
         </div>

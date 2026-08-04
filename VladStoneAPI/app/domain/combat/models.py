@@ -194,6 +194,7 @@ class MatchResult(BaseModel):
     # Canonical terminal cause. The client must not infer it from tower state
     # or the turn number because reconnect/HTTP/WS all show the same result.
     end_reason: str | None = None
+    surrendered_player_id: str | None = None
     # Sole player of the winning team when it has exactly one member (1v1);
     # None for draws and (future) multi-player teams — winner_team is then
     # the authoritative field.

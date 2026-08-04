@@ -8,6 +8,7 @@ from app.domain.combat.engine.battle import (
     BattleStateV4,
     create_v4_battle,
     resolve_v4_turn,
+    surrender_v4_battle,
 )
 from app.domain.combat.engine.content import DECK_CARD_IDS_V4
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent
@@ -139,6 +140,22 @@ def test_all_towers_destroyed_on_fiftieth_turn_beats_judgement() -> None:
     assert state.status == MatchLifecycleStatus.FINISHED
     assert state.result.winner_team == 0
     assert state.result.end_reason == "all_towers_destroyed"
+
+
+def test_surrender_tracks_actor_and_only_rewards_a_played_five_turn_match() -> None:
+    early = make_battle()
+    surrender_v4_battle(early, surrendered_player_id=human_of(early).id)
+    assert early.status == MatchLifecycleStatus.FINISHED
+    assert early.result.end_reason == "surrender"
+    assert early.result.surrendered_player_id == "p1"
+    assert early.result.winner_team == 1
+    assert early.result.reward_coins == 0
+
+    eligible = make_battle()
+    eligible.completed_turns_by_player["p1"] = 5
+    eligible.played_cards_by_player["p1"] = 1
+    surrender_v4_battle(eligible, surrendered_player_id="p1")
+    assert eligible.result.reward_coins == 5
 
 
 def test_turn_timer_shrinks_from_turn_15_to_floor() -> None:

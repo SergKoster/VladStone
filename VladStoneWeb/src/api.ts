@@ -343,6 +343,10 @@ export function getCombat(matchId: string) {
   return request<CombatResponse>(`/combat/${matchId}`);
 }
 
+export function surrenderCombat(matchId: string) {
+  return request<CombatResponse>(`/combat/${matchId}/surrender`, { method: "POST" });
+}
+
 export function getActiveCombats() {
   return request<{ matches: CombatMatch[] }>("/combat/active");
 }

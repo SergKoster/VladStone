@@ -89,6 +89,8 @@ class BattleStateV4(BaseModel):
     pending_plans: dict[str, PlayerIntents] = Field(default_factory=dict)
     ready_player_ids: list[str] = Field(default_factory=list)
     ready_since: datetime | None = None
+    completed_turns_by_player: dict[str, int] = Field(default_factory=dict)
+    played_cards_by_player: dict[str, int] = Field(default_factory=dict)
 
 
 def build_context(
@@ -286,6 +288,13 @@ def resolve_v4_turn(
     apply_context(state, ctx)
     state.last_resolved_turn = resolved_turn
     state.last_events = events
+    for player in state.players:
+        completed = state.completed_turns_by_player.get(player.id, 0)
+        state.completed_turns_by_player[player.id] = completed + 1
+    for event in events:
+        if event.kind in {"spawned", "spell_cast"} and event.player_id is not None:
+            played = state.played_cards_by_player.get(event.player_id, 0)
+            state.played_cards_by_player[event.player_id] = played + 1
     # V3: планы и готовность живут в рамках одного хода.
     state.pending_plans = {}
     state.ready_player_ids = []
@@ -345,6 +354,27 @@ def _finish(state: BattleStateV4, winner_team: int | None, *, end_reason: str) -
     state.result.winner_team = winner_team
     state.result.winner_id = winners[0].id if len(winners) == 1 else None
     state.result.reward_coins = 5 if (winner_team is not None and human_won) else 1
+
+
+def surrender_v4_battle(state: BattleStateV4, *, surrendered_player_id: str) -> None:
+    """Finish an active match on a server-validated surrender request."""
+    if state.status != MatchLifecycleStatus.PLANNING:
+        raise ValueError(f"Combat match is {state.status.value}")
+    surrendered = next(
+        (player for player in state.players if player.id == surrendered_player_id), None
+    )
+    if surrendered is None:
+        raise ValueError("Player is not a match participant")
+    winner_team = next(
+        (player.team for player in state.players if player.team != surrendered.team), None
+    )
+    _finish(state, winner_team, end_reason="surrender")
+    state.result.surrendered_player_id = surrendered.id
+    eligible = (
+        state.completed_turns_by_player.get(surrendered.id, 0) >= 5
+        and state.played_cards_by_player.get(surrendered.id, 0) > 0
+    )
+    state.result.reward_coins = 5 if eligible and winner_team is not None else 0
 
 
 def _coin_from_id(match_id: str, num_players: int) -> int:

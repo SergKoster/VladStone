@@ -14,6 +14,7 @@ from app.domain.combat.engine.battle import (
     resolve_v4_turn,
     set_player_ready,
     store_pending_plan,
+    surrender_v4_battle,
 )
 from app.domain.combat.engine.intents import PlayerIntents, SpawnIntent, SpellIntent
 from app.domain.combat.engine.payload import (
@@ -197,6 +198,52 @@ async def set_turn_readiness(
     # PvP opponent see confirmation promptly without learning any placements.
     await match_channel_manager.broadcast_match_update(state)
     return {"ok": True, "turn": state.turn, "ready": payload.ready}
+
+
+@router.post("/{match_id}/surrender")
+async def surrender_combat_match(
+    match_id: str,
+    db: DbSession,
+    refresh_token: RefreshTokenCookie = None,
+) -> dict:
+    """Authenticated, idempotent-through-optimistic-lock surrender transition."""
+    user = _combat_user_or_401(db, refresh_token)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    _require_combat_rate(_turn_rate_key(db, refresh_token), limit=TURN_ACTION_LIMIT)
+    record = _get_authorized_record(db, match_id, refresh_token)
+    if _expire_record_if_stale(db, record) or _expire_record_if_outdated(db, record):
+        await match_channel_manager.broadcast_expired(match_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Combat match is unavailable"
+        )
+    if _resolve_expired_record_if_needed(db, record) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Combat turn deadline has passed"
+        )
+    state = load_v4_battle(record)
+    viewer_id = _viewer_id_for_record(db, state, record, refresh_token)
+    try:
+        surrender_v4_battle(state, surrendered_player_id=viewer_id or "")
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    save_v4_battle(record, state)
+    winner = next(
+        (player for player in state.players if player.team == state.result.winner_team), None
+    )
+    try:
+        if winner is not None and winner.user_id is not None:
+            claim_combat_reward(db, match=state, user_id=winner.user_id)
+        audit(db, user.id, "combat.match_surrendered", {"match_id": match_id, "turn": state.turn})
+        db.commit()
+    except StaleDataError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Combat match ended elsewhere"
+        ) from None
+    response = v4_combat_response(state, viewer_id=viewer_id)
+    await match_channel_manager.broadcast_match_update(state)
+    return response
 
 
 async def _load_planning_state_or_409(
