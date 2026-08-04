@@ -30,6 +30,7 @@ import { Collection } from "./features/collection/Collection";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { CreatedInviteLobby, JoinInvite, PENDING_INVITE_ROUTE_KEY } from "./features/invite/InviteLobby";
 import { QuickMatch } from "./features/matchmaking/QuickMatch";
+import { Friends } from "./features/social/Friends";
 import { Profile } from "./features/profile/Profile";
 import { HandleOnboarding } from "./features/profile/HandleOnboarding";
 import { t } from "./i18n";
@@ -301,6 +302,9 @@ function App() {
           <NavButton active={route.page === "collection"} onClick={() => setRoute("collection")}>
             {t.collection}
           </NavButton>
+          <NavButton active={route.page === "friends"} onClick={() => setRoute("friends")}>
+            Друзья
+          </NavButton>
           <NavButton active={route.page === "battle"} onClick={() => setRoute("battle")}>
             {t.battle}
           </NavButton>
@@ -352,6 +356,9 @@ function App() {
             cards={collection}
             catalog={catalog}
           />
+        )}
+        {route.page === "friends" && (
+          <Friends onBattle={(matchId) => setRoute({ page: "battle", matchId })} />
         )}
         {route.page === "battle" && (
           <BattleV4

@@ -275,6 +275,17 @@ export type QuickMatchmakingStatus = {
   match_id: string | null;
 };
 
+export type SocialPerson = { user_id: number; handle: string };
+export type SocialChallenge = { id: string; user: SocialPerson; expires_at: string };
+export type SocialSnapshot = {
+  friends: SocialPerson[];
+  incoming_requests: SocialPerson[];
+  outgoing_requests: SocialPerson[];
+  blocked: SocialPerson[];
+  incoming_challenges: SocialChallenge[];
+  outgoing_challenges: SocialChallenge[];
+};
+
 export type MatchSocketMessage =
   | ({ type: "match.snapshot" | "match.updated" } & CombatResponse)
   | { type: "pong" };
@@ -406,6 +417,56 @@ export function getQuickMatchmakingStatus() {
 
 export function cancelQuickMatchmaking() {
   return request<QuickMatchmakingStatus>("/matchmaking/quick", { method: "DELETE" });
+}
+
+export function getSocial() {
+  return request<SocialSnapshot>("/social");
+}
+
+export function searchSocialHandle(handle: string) {
+  return request<SocialPerson>(`/social/search?handle=${encodeURIComponent(handle)}`);
+}
+
+export function requestFriend(handle: string) {
+  return request<{ status: "pending" | "accepted"; user: SocialPerson }>("/social/friend-requests", {
+    method: "POST",
+    body: JSON.stringify({ handle }),
+  });
+}
+
+export function acceptFriend(userId: number) {
+  return request<{ ok: boolean }>(`/social/friend-requests/${userId}/accept`, { method: "POST" });
+}
+
+export function removeFriendRequest(userId: number) {
+  return request<void>(`/social/friend-requests/${userId}`, { method: "DELETE" });
+}
+
+export function removeFriend(userId: number) {
+  return request<void>(`/social/friends/${userId}`, { method: "DELETE" });
+}
+
+export function blockSocialUser(userId: number) {
+  return request<{ ok: boolean }>(`/social/blocks/${userId}`, { method: "POST" });
+}
+
+export function unblockSocialUser(userId: number) {
+  return request<void>(`/social/blocks/${userId}`, { method: "DELETE" });
+}
+
+export function sendFriendChallenge(userId: number) {
+  return request<SocialChallenge>("/social/challenges", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+}
+
+export function acceptFriendChallenge(challengeId: string) {
+  return request<{ match_id: string }>(`/social/challenges/${challengeId}/accept`, { method: "POST" });
+}
+
+export function removeFriendChallenge(challengeId: string) {
+  return request<void>(`/social/challenges/${challengeId}`, { method: "DELETE" });
 }
 
 // V3: интент-стриминг — сервер хранит последний план и применит его на

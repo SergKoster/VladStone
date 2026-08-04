@@ -578,6 +578,17 @@ waiting-entry в той же транзакции, поэтому очередь
 Клиентский polling замедляется в скрытой вкладке и при `matched` открывает
 канонический `match_id`.
 
+**Друзья, блокировки и вызовы реализованы** (август 2026): migration `0007`
+добавляет `friend_relationships` с composite normalized key, направленные
+`user_blocks` и optimistic-locked `battle_challenges`. `services/social.py`
+держит все переходы в одной транзакции: reciprocal request принимает одну
+пару, block удаляет дружбу и pending challenge, а каждое создание/accept
+проверяет блок в обоих направлениях. Challenge не резервирует active slot при
+создании; accept сначала блокирует accounts в стабильном порядке, затем
+challenge и friendship, и через `BattleAdmissionService` создаёт сразу
+активный матч. `GET /social` — приватная проекция собственных связей; поиск
+возвращает только public handle/id и не влияет на видимость public profile.
+
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
 - **Матч = N участников в командах**: у `PlayerState` есть `team` (сторона поля

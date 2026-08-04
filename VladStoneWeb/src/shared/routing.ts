@@ -1,6 +1,6 @@
 import React from "react";
 
-export type StaticRoute = "dashboard" | "collection";
+export type StaticRoute = "dashboard" | "collection" | "friends";
 export type AppRoute =
   | { page: StaticRoute }
   | { page: "profile"; handle?: string }
@@ -11,7 +11,7 @@ export type AppRoute =
 
 export type RouteTarget = StaticRoute | "battle" | "quick" | AppRoute;
 
-const staticRoutes: StaticRoute[] = ["dashboard", "collection"];
+const staticRoutes: StaticRoute[] = ["dashboard", "collection", "friends"];
 
 export function useHashRoute(defaultRoute: StaticRoute = "dashboard") {
   const [route, setRouteState] = React.useState<AppRoute>(() => readHashRoute(defaultRoute));

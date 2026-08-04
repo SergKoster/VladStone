@@ -2872,3 +2872,67 @@ nav {
     width: min(100%, calc((100dvh - 250px) * var(--cols, 5) / var(--rows, 5)));
   }
 }
+
+.friends-page {
+  display: grid;
+  gap: 14px;
+}
+
+.friend-search,
+.friend-search-result,
+.friend-row,
+.friends-columns {
+  display: flex;
+  gap: 10px;
+}
+
+.friend-search {
+  max-width: 520px;
+}
+
+.friend-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.friend-search-result,
+.friend-section {
+  border: 1px solid #d4ddd6;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfcfa;
+}
+
+.friend-search-result {
+  align-items: center;
+  max-width: 520px;
+}
+
+.friends-columns {
+  align-items: start;
+  flex-wrap: wrap;
+}
+
+.friend-section {
+  display: grid;
+  gap: 10px;
+  min-width: min(100%, 280px);
+  flex: 1 1 280px;
+}
+
+.friend-section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.friend-row {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.friend-row > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

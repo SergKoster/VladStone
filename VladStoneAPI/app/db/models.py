@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -278,6 +279,83 @@ class QuickMatchmakingEntry(Base):
         ForeignKey("combat_matches.id"), nullable=True, index=True
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    __mapper_args__ = {"version_id_col": revision}
+
+
+class FriendRelationship(Base):
+    """One normalized pair represents a pending or accepted friendship."""
+
+    __tablename__ = "friend_relationships"
+    __table_args__ = (
+        CheckConstraint("user_low_id < user_high_id", name="ck_friend_relationships_normalized"),
+        CheckConstraint(
+            "status IN ('pending', 'accepted')",
+            name="ck_friend_relationships_status",
+        ),
+    )
+
+    user_low_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    user_high_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    requested_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class UserBlock(Base):
+    """A directional block; both directions are allowed and independent."""
+
+    __tablename__ = "user_blocks"
+    __table_args__ = (
+        CheckConstraint("blocker_user_id != blocked_user_id", name="ck_user_blocks_not_self"),
+    )
+
+    blocker_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    blocked_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+
+class BattleChallenge(Base):
+    """A direct friend challenge which creates no combat lobby until accepted."""
+
+    __tablename__ = "battle_challenges"
+    __table_args__ = (
+        CheckConstraint(
+            "challenger_user_id != challenged_user_id",
+            name="ck_battle_challenges_not_self",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'declined', 'cancelled', 'expired')",
+            name="ck_battle_challenges_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    challenger_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    challenged_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    match_id: Mapped[str | None] = mapped_column(
+        ForeignKey("combat_matches.id"), nullable=True, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
     __mapper_args__ = {"version_id_col": revision}
 
