@@ -159,7 +159,7 @@ nav {
    остальные страницы (.page, max-width 1120px) не трогаем. */
 .content-battle {
   padding: 20px 24px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .page {
@@ -386,7 +386,7 @@ nav {
   align-items: stretch;
   max-width: 1100px;
   min-height: calc(100dvh - 56px);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .battle-stage {
@@ -401,12 +401,6 @@ nav {
      ~290px — башни, оверлей, мана и отступы вокруг поля. */
   width: min(100%, calc((100dvh - 290px) * var(--cols, 5) / var(--rows, 5)), 780px);
   margin-inline: auto;
-}
-
-/* Thin battle header — keeps the start / new-battle action out of the way. */
-.battle-topbar {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .ghost-btn {
@@ -657,70 +651,6 @@ nav {
   100% {
     opacity: 0;
     transform: translateY(-18px);
-  }
-}
-
-/* Resolve-phase indicator ("итерация N"): a light-blue pill in the banner slot
-   above the board during resolution — sits over no cell, so it never hides a
-   unit. Shows the phase / iteration and pops on each change (COMBAT_REWORK §18.3). */
-.phase-overlay-slot {
-  display: grid;
-  place-items: center;
-  min-height: 2.35rem;
-  margin: 0.2rem 0;
-}
-
-.iteration-overlay {
-  justify-self: center;
-  padding: 0.4em 1.1em;
-  border-radius: 999px;
-  background: rgb(64 156 230 / 0.94);
-  color: #f4f9ff;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  text-align: center;
-  box-shadow: 0 3px 12px rgb(24 60 110 / 0.32);
-}
-
-.iteration-overlay.exiting {
-  pointer-events: none;
-  animation: iteration-fade-out var(--phase-fade-ms, 220ms) ease-in forwards;
-}
-
-/* Keyed by iterationStep in the JSX, so it remounts and pops on each change. */
-.iteration-overlay > span {
-  display: inline-block;
-  animation: iteration-pop 240ms ease-out;
-}
-
-@keyframes iteration-pop {
-  0% {
-    opacity: 0.35;
-    transform: translateY(-3px) scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes iteration-fade-out {
-  to {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .iteration-overlay > span {
-    animation: none;
-  }
-
-  .iteration-overlay.exiting {
-    opacity: 0;
-    animation: none;
   }
 }
 
@@ -1620,13 +1550,6 @@ nav {
   min-height: calc(100dvh - 120px);
 }
 
-.rt-status {
-  align-self: center;
-  margin-right: auto;
-  color: #6b7d75;
-  font-size: 0.72rem;
-}
-
 .board-v4-wrap {
   position: relative;
   z-index: 1;
@@ -2447,6 +2370,8 @@ nav {
 
 .tower-slot {
   min-width: 0;
+  display: grid;
+  place-items: center;
 }
 
 .tower {
@@ -2478,7 +2403,11 @@ nav {
 .tower-token {
   position: relative;
   z-index: 2;
+  width: min(68%, 56px);
   transition: filter 160ms ease;
+}
+.tower.dead {
+  width: min(68%, 56px);
 }
 .tower-token.lunging {
   z-index: 5;
@@ -2501,6 +2430,20 @@ nav {
   font-size: clamp(0.55rem, 2.1vw, 0.72rem);
   font-weight: 800;
   line-height: 1.1;
+}
+
+.battle-sidebar-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.battle-surrender {
+  width: 100%;
+  background: #9d3d35;
+}
+
+.battle-surrender:hover:not(:disabled) {
+  background: #7f302a;
 }
 
 .hand-v4 {

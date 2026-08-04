@@ -26,7 +26,6 @@ import {
   DECK_DRAW_MS,
   LUNGE_MS,
   MOVE_MS,
-  PHASE_OVERLAY_FADE_MS,
   POPUP_TTL_MS,
   SPAWN_MS,
   SPELL_CAST_MS,
@@ -38,7 +37,7 @@ import {
   type LungeEffect,
 } from "./battleAnimations";
 import { type MatchRealtimeStatus, connectMatchRealtime } from "./matchRealtime";
-import { phaseLabel, responsePlaybackKey } from "./turnPlayback";
+import { responsePlaybackKey } from "./turnPlayback";
 import { useTurnPlayback } from "./useTurnPlayback";
 
 type Props = {
@@ -46,7 +45,15 @@ type Props = {
   statuses: CombatStatusDefinition[];
   /** Deep link target; avoids restoring an unrelated active PvE match. */
   initialMatchId?: string;
+  onBattleControlsChange: (controls: BattleSidebarControls | null) => void;
   onBattleFinished: () => void;
+};
+
+type BattleSidebarControls = {
+  start: () => void;
+  startDisabled: boolean;
+  surrender: () => void;
+  surrenderDisabled: boolean;
 };
 
 type PlannedUnit = { kind: "unit"; card_id: string; row: number; col: number };
@@ -88,7 +95,13 @@ type CombatDetail = {
   unit?: CombatUnit;
 };
 
-export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: Props) {
+export function BattleV4({
+  cards,
+  statuses,
+  initialMatchId,
+  onBattleControlsChange,
+  onBattleFinished,
+}: Props) {
   const catalog = React.useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const statusCatalog = React.useMemo(
     () => new Map(statuses.map((status) => [status.id, status])),
@@ -111,7 +124,6 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     dyingIds,
     isAnimating,
     lunges,
-    phaseEvent,
     playTurn,
     popups,
     spawningIds,
@@ -159,6 +171,8 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   const [inspected, setInspected] = React.useState<InspectedUnit | null>(null);
   const detailSourceRef = React.useRef<HTMLElement | null>(null);
   const [detail, setDetail] = React.useState<CombatDetail | null>(null);
+  const startControlRef = React.useRef<() => void>(() => undefined);
+  const surrenderControlRef = React.useRef<() => void>(() => undefined);
 
   function planStorageKey(matchId: string, turn: number) {
     return `${LOCAL_PLAN_STORAGE_PREFIX}${matchId}:${turn}`;
@@ -737,6 +751,25 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     }
   }
 
+  startControlRef.current = () => void handleStart();
+  surrenderControlRef.current = () => void handleSurrender();
+  const startDisabled = busy || isAnimating;
+  const surrenderDisabled = !match || busy || isAnimating || isFinished;
+
+  React.useEffect(() => {
+    onBattleControlsChange({
+      start: () => startControlRef.current(),
+      startDisabled,
+      surrender: () => surrenderControlRef.current(),
+      surrenderDisabled,
+    });
+  }, [onBattleControlsChange, startDisabled, surrenderDisabled]);
+
+  React.useEffect(
+    () => () => onBattleControlsChange(null),
+    [onBattleControlsChange],
+  );
+
   const unitAt = (row: number, col: number): CombatUnit | undefined =>
     renderedMatch?.units.find((u) => !u.is_tower && u.row === row && u.col === col);
   const plannedAt = (row: number, col: number) =>
@@ -916,9 +949,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
   if (!match) {
     return (
       <section className="battle-empty">
-        <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
-          {busy ? "Запуск..." : "Старт боя"}
-        </button>
+        <p>Нажми «Новый бой» в боковом меню.</p>
       </section>
     );
   }
@@ -927,7 +958,6 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
     (visibleMatch.tower_slots ?? [])
       .filter((slot) => slot.side === side)
       .sort((a, b) => a.col - b.col);
-  const currentPhaseLabel = phaseLabel(phaseEvent);
   const lungeByUnit = new Map(
     lunges.map((lunge) => [
       lunge.unitId,
@@ -985,16 +1015,6 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
       {/* U2: --cols/--rows и тайминги заданы на stage — от них считаются и кап
           поля по высоте вьюпорта, и геометрия слоёв (наследование CSS-переменных). */}
       <section className="battle-stage" style={boardStyle}>
-        <div className="battle-topbar">
-          <button className="ghost-btn" disabled={busy || isAnimating} onClick={handleStart}>
-            Новый бой
-          </button>
-          <button className="ghost-btn" disabled={busy || isAnimating || isFinished} onClick={handleSurrender}>
-            Сдаться
-          </button>
-          <span className="rt-status">{realtime}</span>
-        </div>
-
         <TowerRow
           activeUnitId={activeEvent?.actor_id}
           cols={cols}
@@ -1017,10 +1037,6 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
           targetUnitId={activeEvent?.target_id}
           towers={towersOf(enemy?.side ?? "top")}
         />
-
-        <div className="phase-overlay-slot">
-          <PhaseOverlay label={currentPhaseLabel} />
-        </div>
 
         <div className="board-v4-wrap">
           <div className="board-v4">
@@ -1555,38 +1571,6 @@ function TowerRow({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function PhaseOverlay({ label }: { label: string | null }) {
-  const [displayedLabel, setDisplayedLabel] = React.useState(label);
-
-  React.useEffect(() => {
-    if (label) {
-      setDisplayedLabel(label);
-      return undefined;
-    }
-    if (!displayedLabel) return undefined;
-    const timer = window.setTimeout(
-      () => setDisplayedLabel(null),
-      PHASE_OVERLAY_FADE_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [displayedLabel, label]);
-
-  if (!displayedLabel) return null;
-  return (
-    <div
-      className={`iteration-overlay${label ? "" : " exiting"}`}
-      role="status"
-      style={
-        {
-          ["--phase-fade-ms" as string]: `${PHASE_OVERLAY_FADE_MS}ms`,
-        } as React.CSSProperties
-      }
-    >
-      <span key={displayedLabel}>{displayedLabel}</span>
     </div>
   );
 }

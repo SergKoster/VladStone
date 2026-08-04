@@ -29,6 +29,13 @@ import { t } from "./i18n";
 import { useHashRoute } from "./shared/routing";
 import { useServerResource } from "./shared/serverState";
 
+type BattleSidebarControls = {
+  start: () => void;
+  startDisabled: boolean;
+  surrender: () => void;
+  surrenderDisabled: boolean;
+};
+
 function App() {
   const [route, setRoute] = useHashRoute();
   const [email, setEmail] = React.useState("");
@@ -37,6 +44,8 @@ function App() {
   const [authUser, setAuthUser] = React.useState<AuthUser | null>(null);
   const [authMessage, setAuthMessage] = React.useState("");
   const [inviteMessage, setInviteMessage] = React.useState("");
+  const [battleSidebarControls, setBattleSidebarControls] =
+    React.useState<BattleSidebarControls | null>(null);
   const [sessionChecked, setSessionChecked] = React.useState(false);
   const [providers, setProviders] = React.useState<AuthProviders | null>(null);
 
@@ -167,6 +176,11 @@ function App() {
     }
   }
 
+  const handleBattleControlsChange = React.useCallback(
+    (controls: BattleSidebarControls | null) => setBattleSidebarControls(controls),
+    [],
+  );
+
   if (!sessionChecked) {
     // Blank flash instead of a misleading login screen while we ask the
     // server whether the cookie is still a valid session.
@@ -212,6 +226,24 @@ function App() {
             {t.profile}
           </NavButton>
         </nav>
+        {route.page === "battle" ? (
+          <div aria-label="Действия боя" className="battle-sidebar-controls">
+            <button
+              className="secondary"
+              disabled={battleSidebarControls?.startDisabled ?? true}
+              onClick={() => battleSidebarControls?.start()}
+            >
+              Новый бой
+            </button>
+            <button
+              className="battle-surrender"
+              disabled={battleSidebarControls?.surrenderDisabled ?? true}
+              onClick={() => battleSidebarControls?.surrender()}
+            >
+              Сдаться
+            </button>
+          </div>
+        ) : null}
         <button className="secondary" onClick={handleLogout}>
           Выйти
         </button>
@@ -240,6 +272,7 @@ function App() {
             key={route.matchId ?? "active-or-pve"}
             cards={catalog}
             initialMatchId={route.matchId}
+            onBattleControlsChange={handleBattleControlsChange}
             statuses={statusCatalog}
             onBattleFinished={() => profileState.refresh().catch(() => undefined)}
           />
