@@ -996,8 +996,10 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         </div>
 
         <TowerRow
+          activeUnitId={activeEvent?.actor_id}
           cols={cols}
           label="Башни врага"
+          lungeByUnit={lungeByUnit}
           onTowerOpen={(tower, source) =>
             openDetail(
               {
@@ -1012,6 +1014,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
             )
           }
           slots={towerSlotsOf(enemy?.side ?? "top")}
+          targetUnitId={activeEvent?.target_id}
           towers={towersOf(enemy?.side ?? "top")}
         />
 
@@ -1209,8 +1212,10 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
         </div>
 
         <TowerRow
+          activeUnitId={activeEvent?.actor_id}
           cols={cols}
           label="Твои башни"
+          lungeByUnit={lungeByUnit}
           onTowerOpen={(tower, source) =>
             openDetail(
               {
@@ -1225,6 +1230,7 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
             )
           }
           slots={towerSlotsOf(viewer?.side ?? "bottom")}
+          targetUnitId={activeEvent?.target_id}
           towers={towersOf(viewer?.side ?? "bottom")}
         />
 
@@ -1450,16 +1456,22 @@ export function BattleV4({ cards, statuses, initialMatchId, onBattleFinished }: 
 }
 
 function TowerRow({
+  activeUnitId,
   cols,
   label,
+  lungeByUnit,
   onTowerOpen,
   slots,
+  targetUnitId,
   towers,
 }: {
+  activeUnitId?: string | null;
   cols: number;
   label: string;
+  lungeByUnit: Map<string, LungeEffect>;
   onTowerOpen: (tower: CombatUnit, source: HTMLButtonElement) => void;
   slots: CombatTowerSlot[];
+  targetUnitId?: string | null;
   towers: CombatUnit[];
 }) {
   const towerByCol = new Map(towers.map((tower) => [tower.col, tower]));
@@ -1488,13 +1500,47 @@ function TowerRow({
             {alive && tower ? (
               <button
                 aria-label={`Подробнее: башня линии ${col + 1}, здоровье ${tower.current_hp}`}
-                className="tower"
+                className={`tower tower-token${lungeByUnit.has(tower.id) ? " lunging" : ""}`}
                 onClick={(event) => onTowerOpen(tower, event.currentTarget)}
                 type="button"
               >
-                <span className="tower-hp">{tower.current_hp}</span>
-                <span className="tower-bar">
-                  <span style={{ width: `${Math.max(0, (tower.current_hp / tower.max_hp) * 100)}%` }} />
+                <span
+                  className={`unit-token-inner tower-token-inner${lungeByUnit.has(tower.id) ? " striking" : ""}`}
+                  style={
+                    lungeByUnit.has(tower.id)
+                      ? ({
+                          ["--lunge-x" as string]: `${lungeByUnit.get(tower.id)!.dx}%`,
+                          ["--lunge-y" as string]: `${lungeByUnit.get(tower.id)!.dy}%`,
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <span
+                    className={[
+                      "unit-v4",
+                      "tower-v4",
+                      activeUnitId === tower.id ? "acting" : "",
+                      targetUnitId === tower.id ? "targeted" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <span className="unit-v4-art">
+                      <CardArt cardId="tower_default" label="Башня" rarity="common" />
+                    </span>
+                    <span className="unit-v4-stat unit-v4-attacks" title="Атаки за ход">
+                      <SwordIcon />
+                      {tower.remaining_attacks}
+                    </span>
+                    <span className="unit-v4-stat unit-v4-dmg" title="Урон">
+                      <BurstIcon />
+                      {tower.damage}
+                    </span>
+                    <span className="unit-v4-stat unit-v4-hp" title="Здоровье">
+                      <HeartIcon />
+                      {Math.max(0, tower.current_hp)}
+                    </span>
+                  </span>
                 </span>
               </button>
             ) : (
@@ -1503,8 +1549,7 @@ function TowerRow({
                 className="tower dead"
                 role="img"
               >
-                <span className="tower-hp">0</span>
-                <span className="tower-bar"><span style={{ width: "0%" }} /></span>
+                <span className="tower-ruin">Разрушена</span>
               </div>
             )}
           </div>

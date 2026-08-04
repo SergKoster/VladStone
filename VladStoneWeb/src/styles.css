@@ -1629,9 +1629,12 @@ nav {
 
 .board-v4-wrap {
   position: relative;
+  z-index: 1;
   width: 100%;
   aspect-ratio: var(--cols) / var(--rows);
-  overflow: clip;
+  /* Удар по башне выходит в призрачный ряд за границей поля. Он должен
+     оказаться поверх токена башни, а не обрезаться контейнером доски. */
+  overflow: visible;
 }
 
 .board-v4 {
@@ -1645,6 +1648,7 @@ nav {
 
 .unit-layer-v4 {
   --gap: 5px;
+  isolation: isolate;
 }
 
 .unit-layer-v4 .unit-token {
@@ -2094,6 +2098,10 @@ nav {
 }
 
 .unit-layer-v4 .damage-popup {
+  /* Попапы идут после токенов в DOM, но у анимируемых токенов есть свой
+     stacking context. Явный верхний слой не даёт подсказке «Нет действий»
+     скрыться за юнитом из соседней клетки. */
+  z-index: 20;
   grid-template-columns: auto auto;
   gap: 0.12rem;
   justify-content: center;
@@ -2430,6 +2438,8 @@ nav {
 }
 
 .tower-row {
+  position: relative;
+  z-index: 0;
   display: grid;
   grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr));
   gap: 5px;
@@ -2440,14 +2450,13 @@ nav {
 }
 
 .tower {
-  display: grid;
   box-sizing: border-box;
   width: 100%;
-  gap: 2px;
-  padding: 3px 4px;
-  border: 1px solid #b9c8bf;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
-  background: #eef3ef;
+  background: transparent;
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -2458,27 +2467,40 @@ nav {
   outline-offset: 2px;
 }
 .tower.dead {
+  display: grid;
+  place-items: center;
   opacity: 0.35;
   cursor: default;
   filter: grayscale(1);
+  border: 1px solid #b9c8bf;
+  background: #eef3ef;
 }
-.tower-hp {
-  font-size: 0.74rem;
-  font-weight: 800;
-  color: #21372f;
+.tower-token {
+  position: relative;
+  z-index: 2;
+  transition: filter 160ms ease;
 }
-.tower-bar {
-  display: block;
-  height: 5px;
-  border-radius: 3px;
-  background: #d3ddd6;
-  overflow: hidden;
+.tower-token.lunging {
+  z-index: 5;
 }
-.tower-bar > span {
-  display: block;
+.tower-token-inner {
+  display: grid;
+  width: 100%;
   height: 100%;
-  background: #3f9d5f;
-  transition: width 220ms ease;
+  place-items: center;
+}
+.tower-v4 {
+  box-shadow: 0 0 0 2px #54778f;
+}
+.tower-v4 .unit-v4-art > .card-art {
+  background: radial-gradient(circle at 50% 85%, #24384a, #101b25);
+}
+.tower-ruin {
+  padding: 0.25rem;
+  color: #42524a;
+  font-size: clamp(0.55rem, 2.1vw, 0.72rem);
+  font-weight: 800;
+  line-height: 1.1;
 }
 
 .hand-v4 {
