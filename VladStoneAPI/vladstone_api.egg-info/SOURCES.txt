@@ -8,6 +8,7 @@ app/api/routes/__init__.py
 app/api/routes/auth.py
 app/api/routes/combat.py
 app/api/routes/health.py
+app/api/routes/matches.py
 app/api/routes/me.py
 app/api/routes/telemetry.py
 app/api/routes/ws.py
@@ -52,6 +53,7 @@ app/domain/combat/engine/intents.py
 app/domain/combat/engine/patterns.py
 app/domain/combat/engine/payload.py
 app/domain/combat/engine/resolver.py
+app/domain/combat/engine/simulation.py
 app/domain/combat/engine/stances.py
 app/domain/combat/engine/statuses.py
 app/domain/combat/engine/tags.py
@@ -71,6 +73,7 @@ app/services/combat_timer_worker.py
 app/services/combat_turn_timers.py
 app/services/dev_logging.py
 app/services/google_oauth.py
+app/services/match_invites.py
 app/services/rate_limit.py
 app/services/rewards.py
 app/services/security.py
@@ -85,12 +88,16 @@ tests/test_engine_effects.py
 tests/test_engine_entities.py
 tests/test_engine_extensions.py
 tests/test_engine_resolver.py
+tests/test_engine_simulation.py
 tests/test_engine_state.py
 tests/test_engine_towers.py
 tests/test_engine_translate.py
 tests/test_google_oauth.py
 tests/test_health.py
 tests/test_match_channels.py
+tests/test_postgres_concurrency.py
+tests/test_pvp_invites.py
+tests/test_pvp_reconnect.py
 tests/test_release_guards.py
 tests/test_telemetry.py
 tests/test_ws_reconnect.py
