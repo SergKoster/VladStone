@@ -211,6 +211,7 @@ function App() {
           <Dashboard
             coins={profile?.coins ?? 0}
             collectionCount={new Set(collection.map((card) => card.id)).size}
+            collectionTotal={catalog.length}
             onInvite={() => void handleCreateInvite()}
             onPlay={() => setRoute("battle")}
             message={inviteMessage}

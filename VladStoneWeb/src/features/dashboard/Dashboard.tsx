@@ -3,12 +3,14 @@ import { t } from "../../i18n";
 export function Dashboard({
   coins,
   collectionCount,
+  collectionTotal,
   message,
   onInvite,
   onPlay,
 }: {
   coins: number;
   collectionCount: number;
+  collectionTotal: number;
   message?: string;
   onInvite: () => void;
   onPlay: () => void;
@@ -27,7 +29,7 @@ export function Dashboard({
       </header>
       <section className="metrics">
         <Metric label={t.coins} value={String(coins)} />
-        <Metric label={t.collectionProgress} value={`${Math.min(collectionCount, 2)} / 2`} />
+        <Metric label={t.collectionProgress} value={`${collectionCount} / ${collectionTotal}`} />
         <Metric label="Режим" value="PvE bot" />
       </section>
       {message ? <p className="dashboard-message">{message}</p> : null}

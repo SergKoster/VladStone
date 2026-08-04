@@ -1921,11 +1921,16 @@ function ResultOverlay({ match, onClose }: { match: CombatMatch; onClose: () => 
   }
   const viewer = match.players.find((p) => p.id === match.viewer_id);
   const didWin = viewer != null && match.result.winner_team === viewer.team;
+  const reason = match.result.end_reason === "judgement"
+    ? "Суд вынес решение по состоянию башен."
+    : match.result.end_reason === "surrender"
+      ? didWin ? "Соперник сдался." : "Ты сдался."
+      : "Все башни противника уничтожены.";
   return (
     <div className="result-backdrop" onClick={onClose}>
       <section className="result-panel" onClick={(e) => e.stopPropagation()}>
         <strong>{didWin ? "Победа" : "Поражение"}</strong>
-        <span>{didWin ? "Башни врага пали." : "Твои башни пали."}</span>
+        <span>{reason}</span>
         <b>+{match.result.reward_coins} монет</b>
         <button onClick={onClose}>Забрать</button>
       </section>
