@@ -589,6 +589,13 @@ challenge и friendship, и через `BattleAdmissionService` создаёт �
 активный матч. `GET /social` — приватная проекция собственных связей; поиск
 возвращает только public handle/id и не влияет на видимость public profile.
 
+**Интеграционная защита поставки** (август 2026): CI поднимает PostgreSQL
+service, применяет Alembic head до запуска lock/race-регрессий, а отдельная
+job валидирует production Compose с подставными секретами и синтаксис
+Caddyfile внутри официального Caddy image. Это проверяет конфигурацию и
+миграции без публикации; live HTTPS/WSS, Google OAuth и два устройства
+остаются ручным production smoke по `DEPLOY.md`.
+
 **Модель участников (R12) реализована** (июль 2026, `RULESET_VERSION` 2):
 
 - **Матч = N участников в командах**: у `PlayerState` есть `team` (сторона поля
